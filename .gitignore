@@ -1,2 +1,5 @@
 venv
 docs
+data
+.github
+__pycache__

@@ -1,0 +1,7 @@
+# requirements.txt
+numpy==1.24.3
+pandas==2.0.2
+matplotlib==3.7.1
+pymoo==0.6.0.1  # For the NSGA-II baseline
+jupyterlab==4.0.0
+pickle5         # For backward compatibility with some .pickle files
