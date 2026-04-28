@@ -231,11 +231,11 @@ $$HV(F, r) = \lambda\left(\bigcup_{f \in F} [f, r]\right)$$
 
 Higher is better. Points are normalised to $[0,1]^2$ before cross-algorithm comparison using the proxy Pareto range as scale.
 
-**Inverted Generational Distance (IGD):** Mean distance from the proxy reference front $P^*$ to the nearest solution in the approximation set $F$:
+**Inverted Generational Distance (IGD):** Mean distance from the proxy reference front $P^{\ast}$ to the nearest solution in the approximation set $F$:
 
-$$IGD(F, P^*) = \frac{1}{|P^*|} \sum_{p \in P^*} \min_{f \in F} \|p - f\|_2$$
+$$IGD(F, P^{\ast}) = \frac{1}{|P^{\ast}|} \sum_{p \in P^{\ast}} \min_{f \in F} \lVert p - f \rVert_2$$
 
-Lower is better. $P^*$ is constructed as the non-dominated union of all algorithm runs across all seeds.
+Lower is better. $P^{\ast}$ is constructed as the non-dominated union of all algorithm runs across all seeds.
 
 ## 9. Implemented Upgrades (Advanced Features)
 
@@ -243,9 +243,9 @@ Lower is better. $P^*$ is constructed as the non-dominated union of all algorith
 
 Rather than fixed $c_1, c_2$, coefficients adapt per sub-problem $k$ based on recent acceptance rate:
 
-$$c_1^{(t+1)} = c_1^{(t)} + \eta \cdot (\rho_{\text{pbest}} - \rho^*), \quad c_2^{(t+1)} = c_2^{(t)} + \eta \cdot (\rho_{\text{gbest}} - \rho^*)$$
+$$c_1^{(t+1)} = c_1^{(t)} + \eta \cdot (\rho_{\text{pbest}} - \rho^{\ast}), \quad c_2^{(t+1)} = c_2^{(t)} + \eta \cdot (\rho_{\text{gbest}} - \rho^{\ast})$$
 
-where $\rho^*$ is a target success rate and $\eta$ is the adaptation step. Sub-problems stuck in local optima automatically increase $c_2$ (exploitation), while diverse sub-problems increase $c_1$ (exploration).
+where $\rho^{\ast}$ is a target success rate and $\eta$ is the adaptation step. Sub-problems stuck in local optima automatically increase $c_2$ (exploitation), while diverse sub-problems increase $c_1$ (exploration).
 
 ### 9.2 Multi-Armed Bandit (MAB) Tool Selection
 
