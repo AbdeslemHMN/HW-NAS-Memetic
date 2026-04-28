@@ -227,7 +227,7 @@ All metrics computed in `src/analysis/pareto_metrics.py` under pymoo's minimisat
 
 **Hypervolume (HV):** Volume of objective space dominated by the Pareto front, bounded by reference point $r$:
 
-$$HV(F, r) = \lambda\!\left(\bigcup_{f \in F} [f,\, r]\right)$$
+$$HV(F, r) = \lambda\left(\bigcup_{f \in F} [f, r]\right)$$
 
 Higher is better. Points are normalised to $[0,1]^2$ before cross-algorithm comparison using the proxy Pareto range as scale.
 
