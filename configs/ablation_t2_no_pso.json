@@ -1,0 +1,15 @@
+{
+  "experiment_name": "no_pso",
+  "description": "T2 — Ablation: PSO disabled. Only GA mutation drives candidate generation. Measures PSO's contribution to local refinement.",
+  "budget": 2000,
+  "k_directions": 5,
+  "t_neighborhood": 2,
+  "t0": 1.0,
+  "alpha": 0.95,
+  "c1": 0.5,
+  "c2": 0.5,
+  "use_ga": true,
+  "use_pso": false,
+  "use_sa": true,
+  "use_restart": true
+}

@@ -35,15 +35,48 @@ def archive_to_points(archive: list[dict]) -> np.ndarray:
     return pts
 
 
+def _pareto_front_2d_sweep(points: np.ndarray) -> np.ndarray:
+    """
+    Memory-efficient 2-objective Pareto front via sort + vectorised sweep.
+    O(N log N) time, O(N) memory — avoids the O(N²) broadcast in pymoo.
+    """
+    order = np.lexsort((points[:, 1], points[:, 0]))   # sort by (f1 asc, f2 asc)
+    f1s = points[order, 0]
+    f2s = points[order, 1]
+
+    # ── assign a group id per unique f1 value ────────────────────────────
+    group_change = np.concatenate([[True], f1s[1:] != f1s[:-1]])
+    group_ids    = np.cumsum(group_change) - 1          # 0-indexed
+    num_groups   = int(group_ids[-1]) + 1
+
+    # ── per-group minimum f2 ─────────────────────────────────────────────
+    group_min_f2 = np.full(num_groups, np.inf)
+    np.minimum.at(group_min_f2, group_ids, f2s)
+
+    # ── minimum f2 of ALL strictly earlier groups (exclusive prefix min) ─
+    cum_min_before = np.full(num_groups, np.inf)
+    cum_min_before[1:] = np.minimum.accumulate(group_min_f2[:-1])
+
+    # ── non-dominated iff: group-minimum AND better than all prior groups ─
+    is_group_min    = f2s == group_min_f2[group_ids]
+    beats_prev      = f2s < cum_min_before[group_ids]
+    return points[order[is_group_min & beats_prev]]
+
+
 def get_pareto_front(points: np.ndarray) -> np.ndarray:
     """
     Extract the non-dominated subset of *points* (N, M) in minimisation space.
+
+    For M == 2 a vectorised O(N log N) sweep is used to avoid the O(N²)
+    memory allocation inside pymoo's ``find_non_dominated``.
 
     :param points: (N, M) array of objective values.
     :return:       (K, M) non-dominated subset, K ≤ N.
     """
     if points.ndim != 2 or len(points) == 0:
         return points
+    if points.shape[1] == 2:
+        return _pareto_front_2d_sweep(points)
     idx = find_non_dominated(points)
     return points[idx]
 
@@ -105,8 +138,16 @@ def proxy_pareto(archives: list[list[dict]]) -> np.ndarray:
     """
     Build a proxy Pareto front P* from the union of multiple run archives.
 
+    Each archive is reduced to its own Pareto front before pooling so the
+    combined set stays small regardless of per-run budget size.
+
     :param archives: List of archives (one per run/algorithm).
     :return:         Non-dominated (K, 2) array in minimisation space.
     """
-    all_pts = np.vstack([archive_to_points(a) for a in archives if a])
-    return get_pareto_front(all_pts)
+    fronts = [
+        get_pareto_front(archive_to_points(a))
+        for a in archives if a
+    ]
+    if not fronts:
+        raise ValueError("proxy_pareto: all archives are empty.")
+    return get_pareto_front(np.vstack(fronts))

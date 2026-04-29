@@ -1,0 +1,15 @@
+{
+  "experiment_name": "no_sa",
+  "description": "T5 — Ablation: Simulated Annealing disabled (greedy acceptance only). Every improvement is accepted, no uphill moves. Measures SA's contribution to escaping local optima.",
+  "budget": 2000,
+  "k_directions": 5,
+  "t_neighborhood": 2,
+  "t0": 1.0,
+  "alpha": 0.95,
+  "c1": 0.5,
+  "c2": 0.5,
+  "use_ga": true,
+  "use_pso": true,
+  "use_sa": false,
+  "use_restart": true
+}
