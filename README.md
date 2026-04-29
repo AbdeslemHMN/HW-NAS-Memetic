@@ -168,7 +168,7 @@ Expected: `Ran 9 tests in ~1s OK`.
 
 **Step 2 — Place benchmark data** at `data/HW-NAS-Bench-v1_0.pickle`.
 
-**Step 3 — Run baselines** (5 seeds, RandomSearch + NSGA-II):
+**Step 3 — Run baselines** (30 seeds, RandomSearch + NSGA-II):
 
 ```bash
 python scripts/run_baselines.py
@@ -182,8 +182,7 @@ Outputs saved to `results/baselines/random_search_seed{N}.json` and `results/bas
 python scripts/run_search.py \
     --hardware edgegpu_latency \
     --budget 2000 \
-    --k_directions 20 \
-    --seed 0
+    --k_directions 20
 ```
 
 All CLI flags with defaults:
@@ -238,6 +237,60 @@ $$IGD(F, P^{\ast}) = \frac{1}{|P^{\ast}|} \sum_{p \in P^{\ast}} \min_{f \in F} \
 Lower is better. $P^{\ast}$ is constructed as the non-dominated union of all algorithm runs across all seeds.
 
 ## 9. Implemented Upgrades (Advanced Features)
+
+The repository now enforces a strict, budget-fair comparison across all algorithms. The key upgrades are:
+
+- **30 independent seeds for every algorithm**
+  - `scripts/run_baselines.py` runs `RandomSearch` and `NSGA-II` for 30 seeds.
+  - `scripts/run_search.py` now runs the proposed algorithm for 30 seeds and writes outputs to `results/proposed/proposed_res_seed{seed}.json`.
+
+- **Exact NFE budget enforcement**
+  - `src/algorithms/base_optimizer.py` tracks `budget_spent` as the exact Number of Function Evaluations (NFE).
+  - `_eval()` raises immediately if `budget_spent >= budget`, guaranteeing no algorithm can exceed the requested 2000 evaluations.
+
+- **Convergence trajectory snapshots**
+  - Every 100 NFEs, the optimizer records a checkpoint in `nfe_checkpoints`.
+  - This enables convergence plots of Hypervolume versus NFE, rather than only final performance.
+
+- **Fair NSGA-II hyperparameters**
+  - `src/algorithms/nsga2_search.py` now uses standard SBX/PM values:
+    - `crossover prob = 0.9`, `eta=20`
+    - `mutation prob = 1/n_var`, `eta=20`
+  - Termination is now `('n_eval', budget)`, matching the proposed algorithm's strict NFE cap.
+
+- **Statistical hypothesis testing**
+  - The comparison notebooks now include Wilcoxon Rank-Sum tests for HV and IGD.
+  - Bonferroni correction is applied to control familywise error across multiple metric comparisons.
+
+## 10. Recommended Run Sequence
+
+Use this exact order for fair evaluation:
+
+```bash
+python scripts/run_baselines.py
+python scripts/run_search.py --hardware edgegpu_latency --budget 2000 --k_directions 20
+```
+
+Then open the notebooks for analysis:
+
+```bash
+jupyter notebook notebooks/
+```
+
+Recommended notebooks:
+
+- `notebooks/01_pareto_front_viz.ipynb`
+- `notebooks/03_algorithm_comparison.ipynb`
+
+## 11. Expected Output Files
+
+- `results/baselines/random_search_seed{0..4}.json`
+- `results/baselines/nsga2_seed{0..4}.json`
+- `results/proposed/proposed_res_seed{0..4}.json`
+- `results/convergence_trajectory.pdf`
+- `results/ablation_pareto_overlay.pdf`
+- `results/ablations_hv_boxplot.pdf`
+
 
 ### 9.1 Self-Adaptive PSO Parameters
 

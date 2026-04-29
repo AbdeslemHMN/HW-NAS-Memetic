@@ -5,19 +5,19 @@ scripts/run_ablations.py
 Automated ablation study runner for HW-NAS-Memetic.
 
 Reads every JSON file in configs/, instantiates ProposedMoeadPso with the
-corresponding feature-toggle configuration, and runs 5 independent seeds per
+corresponding feature-toggle configuration, and runs 30 independent seeds per
 experiment.  Results are saved to results/ablations/{experiment_name}_seed{N}.json.
 
 Usage
 ─────
-    python scripts/run_ablations.py                       # all configs, 5 seeds each
+    python scripts/run_ablations.py                       # all configs, 30 seeds each
     python scripts/run_ablations.py --seeds 0 1           # quick 2-seed smoke test
     python scripts/run_ablations.py --config configs/ablation_t2_no_pso.json
 
 Expected runtime
 ────────────────
 budget=2000, K=5  →  ~10 s per seed on a modern CPU (lookup-only, no GPU needed).
-6 experiments × 5 seeds = 30 runs ≈ 5 min total.
+6 experiments × 30 seeds = 180 runs ≈ 30 min total.
 
 Output structure
 ────────────────
@@ -56,7 +56,7 @@ RESULTS_DIR  = PROJECT_ROOT / "results" / "ablations"
 # ── Evaluation settings (fixed across all ablation runs for fair comparison) ──
 HARDWARE_METRIC = "edgegpu_latency"
 DATASET         = "cifar10"
-N_SEEDS         = 5
+N_SEEDS         = 30
 
 
 def parse_args() -> argparse.Namespace:

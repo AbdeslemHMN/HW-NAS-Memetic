@@ -2,12 +2,13 @@
 """
 CLI entry point for the proposed MOEA/D + Discrete PSO + SA search.
 
+Runs 5 independent seeds so results are directly comparable with the baselines.
+
 Usage:
     python scripts/run_search.py \
         --hardware edgegpu_latency \
         --budget 2000 \
-        --k_directions 20 \
-        --seed 0
+        --k_directions 20
 """
 import argparse
 import logging
@@ -23,9 +24,11 @@ from src.api.hw_nas_wrapper import HWNASApi
 from src.algorithms.proposed_moead_pso import ProposedMoeadPso
 from src.utils.logger import get_logger, save_archive
 
-DATA_PATH   = PROJECT_ROOT / "data" / "HW-NAS-Bench-v1_0.pickle"
-RESULTS_DIR = PROJECT_ROOT / "results" / "proposed"
-DATASET = "cifar10"
+DATA_PATH    = PROJECT_ROOT / "data" / "HW-NAS-Bench-v1_0.pickle"
+RESULTS_DIR  = PROJECT_ROOT / "results" / "proposed"
+DATASET      = "cifar10"
+SEEDS        = list(range(30))
+TOTAL_BUDGET = 2000   # strict NFE cap — must match baselines
 
 
 def parse_args() -> argparse.Namespace:
@@ -42,7 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--budget",
         type=int,
-        default=2000,
+        default=TOTAL_BUDGET,
         help="Total number of architecture evaluations.",
     )
     parser.add_argument(
@@ -89,12 +92,6 @@ def parse_args() -> argparse.Namespace:
         help="NAS-Bench-201 dataset split.",
     )
     parser.add_argument(
-        "--seed",
-        type=int,
-        default=42,
-        help="Random seed for reproducibility.",
-    )
-    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Set logging level to DEBUG.",
@@ -122,47 +119,55 @@ def main() -> None:
     log.info("Configuration: %s", vars(args))
     log.info("Loading HW-NAS-Bench from %s", DATA_PATH)
     api = HWNASApi(str(DATA_PATH))  # auto-detects nas201_accuracy_cache.npz if present
-    eval_fn = build_eval_fn(api, args.hardware, args.dataset)  # hardware = metric key
+    eval_fn = build_eval_fn(api, args.hardware, args.dataset)
 
-    optimizer = ProposedMoeadPso(
-        eval_fn=eval_fn,
-        budget=args.budget,
-        K=args.k_directions,
-        T_neighborhood=args.t_neighborhood,
-        T0=args.t0,
-        alpha=args.alpha,
-        c1=args.c1,
-        c2=args.c2,
-        rng=np.random.default_rng(args.seed),
-    )
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    log.info(
-        "Starting ProposedMoeadPso: K=%d  budget=%d  seed=%d  hardware=%s",
-        args.k_directions, args.budget, args.seed, args.hardware,
-    )
-    archive = optimizer.search()
-    log.info("Search complete. Evaluations used: %d", optimizer.budget_spent)
+    for seed in SEEDS:
+        log.info(
+            "── Seed %d / %d  (budget=%d  K=%d  hardware=%s) ──────────────",
+            seed + 1, len(SEEDS), args.budget, args.k_directions, args.hardware,
+        )
+        optimizer = ProposedMoeadPso(
+            eval_fn=eval_fn,
+            budget=args.budget,
+            K=args.k_directions,
+            T_neighborhood=args.t_neighborhood,
+            T0=args.t0,
+            alpha=args.alpha,
+            c1=args.c1,
+            c2=args.c2,
+            rng=np.random.default_rng(seed),
+        )
 
-    out_path = RESULTS_DIR / f"proposed_res_{args.seed}.json"
-    save_archive(
-        archive,
-        out_path,
-        metadata={
-            "algorithm": "ProposedMoeadPso",
-            "seed": args.seed,
-            "budget": args.budget,
-            "budget_spent": optimizer.budget_spent,
-            "hardware": args.hardware,
-            "dataset": args.dataset,
-            "K": args.k_directions,
-            "T_neighborhood": args.t_neighborhood,
-            "T0": args.t0,
-            "alpha": args.alpha,
-            "c1": args.c1,
-            "c2": args.c2,
-        },
-    )
-    log.info("Results written → %s", out_path)
+        archive = optimizer.search()
+        log.info("Seed %d complete. NFE used: %d", seed, optimizer.budget_spent)
+
+        metadata = {
+            "algorithm":       "ProposedMoeadPso",
+            "seed":            seed,
+            "budget":          args.budget,
+            "n_evaluations":   optimizer.budget_spent,
+            "budget_spent":    optimizer.budget_spent,
+            "nfe_checkpoints": optimizer.nfe_checkpoints,
+            "hardware":        args.hardware,
+            "dataset":         args.dataset,
+            "K":               args.k_directions,
+            "T_neighborhood":  args.t_neighborhood,
+            "T0":              args.t0,
+            "alpha":           args.alpha,
+            "c1":              args.c1,
+            "c2":              args.c2,
+        }
+        assert metadata["n_evaluations"] == TOTAL_BUDGET, (
+            f"[ProposedMoeadPso seed={seed}] Evaluation budget mismatch! "
+            f"Got {metadata['n_evaluations']}, expected {TOTAL_BUDGET}"
+        )
+        out_path = RESULTS_DIR / f"proposed_res_seed{seed}.json"
+        save_archive(archive, out_path, metadata=metadata)
+        log.info("Results written → %s", out_path)
+
+    log.info("All %d seeds complete. Results in %s", len(SEEDS), RESULTS_DIR)
 
 
 if __name__ == "__main__":

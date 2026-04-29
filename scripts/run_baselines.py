@@ -18,13 +18,15 @@ from src.algorithms.nsga2_search import nsga2_search
 from src.utils.logger import get_logger, save_archive
 
 # ── Configuration ────────────────────────────────────────────────────────────
-DATA_PATH   = PROJECT_ROOT / "data" / "HW-NAS-Bench-v1_0.pickle"
-RESULTS_DIR = PROJECT_ROOT / "results" / "baselines"
-SEEDS = [0, 1, 2, 3, 4]
-BUDGET = 200        # evaluations per run  (raise for full experiments)
-POP_SIZE = 20       # NSGA-II population size
-METRIC = "edgegpu_latency"   # hardware metric key within nasbench201
-DATASET = "cifar10"
+DATA_PATH    = PROJECT_ROOT / "data" / "HW-NAS-Bench-v1_0.pickle"
+RESULTS_DIR  = PROJECT_ROOT / "results" / "baselines"
+SEEDS = list(range(30))
+TOTAL_BUDGET = 2000   # strict NFE cap — identical across ALL algorithms
+# NSGA-II budget decomposition: N_pop × (N_gen + 1) = 40 × 50 = 2000
+# (initial population counts as one generation in pymoo's n_eval counter)
+POP_SIZE     = 40    # N_pop — population size
+METRIC       = "edgegpu_latency"   # hardware metric key within nasbench201
+DATASET      = "cifar10"
 
 log = get_logger("baselines")
 
@@ -46,31 +48,50 @@ def main() -> None:
 
     # ── RandomSearch ─────────────────────────────────────────────────────────
     for seed in SEEDS:
-        log.info("[RandomSearch] seed=%d  budget=%d", seed, BUDGET)
-        rs = RandomSearch(eval_fn, budget=BUDGET, rng=np.random.default_rng(seed))
+        log.info("[RandomSearch] seed=%d  budget=%d", seed, TOTAL_BUDGET)
+        rs = RandomSearch(eval_fn, budget=TOTAL_BUDGET, rng=np.random.default_rng(seed))
         archive = rs.search()
-        out_path = RESULTS_DIR / f"random_search_seed{seed}.json"
-        save_archive(
-            archive,
-            out_path,
-            metadata={"algorithm": "RandomSearch", "seed": seed,
-                       "budget": BUDGET, "metric": METRIC, "dataset": DATASET},
+        metadata = {
+            "algorithm":       "RandomSearch",
+            "seed":            seed,
+            "budget":          TOTAL_BUDGET,
+            "n_evaluations":   rs.budget_spent,
+            "budget_spent":    rs.budget_spent,
+            "nfe_checkpoints": rs.nfe_checkpoints,
+            "metric":          METRIC,
+            "dataset":         DATASET,
+        }
+        assert metadata["n_evaluations"] == TOTAL_BUDGET, (
+            f"[RandomSearch seed={seed}] Evaluation budget mismatch! "
+            f"Got {metadata['n_evaluations']}, expected {TOTAL_BUDGET}"
         )
+        out_path = RESULTS_DIR / f"random_search_seed{seed}.json"
+        save_archive(archive, out_path, metadata=metadata)
         log.info("[RandomSearch] seed=%d → %s", seed, out_path)
 
     # ── NSGA-II ───────────────────────────────────────────────────────────────
     for seed in SEEDS:
-        log.info("[NSGA2] seed=%d  budget=%d  pop_size=%d", seed, BUDGET, POP_SIZE)
-        archive = nsga2_search(eval_fn, budget=BUDGET,
-                               pop_size=POP_SIZE, rng_seed=seed)
-        out_path = RESULTS_DIR / f"nsga2_seed{seed}.json"
-        save_archive(
-            archive,
-            out_path,
-            metadata={"algorithm": "NSGA2", "seed": seed,
-                       "budget": BUDGET, "metric": METRIC, "dataset": DATASET,
-                       "pop_size": POP_SIZE},
+        log.info("[NSGA2] seed=%d  budget=%d  pop_size=%d", seed, TOTAL_BUDGET, POP_SIZE)
+        archive, nfe_checkpoints = nsga2_search(
+            eval_fn, budget=TOTAL_BUDGET, pop_size=POP_SIZE, rng_seed=seed
         )
+        metadata = {
+            "algorithm":       "NSGA2",
+            "seed":            seed,
+            "budget":          TOTAL_BUDGET,
+            "n_evaluations":   len(archive),
+            "budget_spent":    len(archive),
+            "nfe_checkpoints": nfe_checkpoints,
+            "metric":          METRIC,
+            "dataset":         DATASET,
+            "pop_size":        POP_SIZE,
+        }
+        assert metadata["n_evaluations"] == TOTAL_BUDGET, (
+            f"[NSGA2 seed={seed}] Evaluation budget mismatch! "
+            f"Got {metadata['n_evaluations']}, expected {TOTAL_BUDGET}"
+        )
+        out_path = RESULTS_DIR / f"nsga2_seed{seed}.json"
+        save_archive(archive, out_path, metadata=metadata)
         log.info("[NSGA2] seed=%d → %s", seed, out_path)
 
     log.info("Baseline sweep complete. Results in %s", RESULTS_DIR)

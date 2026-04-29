@@ -34,12 +34,28 @@ class BaseOptimizer(ABC):
         self.budget_spent: int = 0
         self.global_archive: list[dict] = []
         self.rng: np.random.Generator = rng or np.random.default_rng()
+        # NFE checkpoints: list of NFE values at which a snapshot was taken.
+        # Recorded every _snapshot_interval evaluations. The notebook uses these
+        # to reconstruct the HV trajectory by slicing archive[:nfe].
+        self.nfe_checkpoints: list[int] = []
+        self._snapshot_interval: int = 100
 
     def _eval(self, arch: np.ndarray) -> tuple[float, float]:
         """
-        Evaluate arch, increment budget counter, log entry to global_archive.
+        Evaluate arch, increment NFE counter, log entry to global_archive.
+
+        Raises RuntimeError immediately if the budget is already exhausted —
+        this enforces a strict NFE cutoff: the moment budget_spent == budget
+        the search loop MUST stop without issuing further evaluations.
+
         :return: (accuracy, latency) as floats.
         """
+        if self.budget_spent >= self.budget:
+            raise RuntimeError(
+                f"Budget hard-stop: _eval called at NFE={self.budget_spent} "
+                f"(budget={self.budget}). All search loops must guard with "
+                "'if self.budget_spent >= self.budget: break' before calling _eval."
+            )
         accuracy, latency = self.eval_fn(arch)
         self.budget_spent += 1
         self.global_archive.append(
@@ -49,6 +65,11 @@ class BaseOptimizer(ABC):
                 "latency": float(latency),
             }
         )
+        # Record NFE checkpoint every _snapshot_interval evaluations.
+        # The HV trajectory is reconstructed in post-processing by computing
+        # HV on archive[:nfe] for each nfe in nfe_checkpoints.
+        if self.budget_spent % self._snapshot_interval == 0:
+            self.nfe_checkpoints.append(self.budget_spent)
         return float(accuracy), float(latency)
 
     def _random_arch(self) -> np.ndarray:
