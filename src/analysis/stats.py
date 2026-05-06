@@ -2,16 +2,32 @@
 Non-parametric statistical testing utilities for algorithm comparison.
 
 All functions use scipy.stats and are appropriate for small sample sizes
-(N=5 seeds) where normality cannot be assumed.
+(N=30 seeds) where normality cannot be assumed for stochastic meta-heuristics.
 
 Functions
 ---------
+shapiro_wilk         — Shapiro-Wilk normality test (most powerful for n < 50)
 wilcoxon_ranksum     — Mann-Whitney U test with rank-biserial effect size r
 kruskal_wallis       — Kruskal-Wallis H test for k≥2 independent groups
 bonferroni_correction — Family-wise error rate correction (Bonferroni method)
 
+Methodology Note
+----------------
+Meta-heuristic algorithms are stochastic processes.  Their per-seed performance
+distributions are rarely Gaussian.  The recommended workflow is:
+
+  1. Run ``shapiro_wilk`` on each algorithm's HV vector.
+  2. If *any* group fails normality (p < 0.05), use non-parametric tests
+     for all comparisons to maintain consistency.
+  3. Use ``kruskal_wallis`` first (omnibus test across all k algorithms).
+  4. If significant, apply pairwise ``wilcoxon_ranksum`` for post-hoc analysis.
+  5. Adjust p-values with ``bonferroni_correction`` to control FWER.
+  6. Report rank-biserial correlation ``r`` as the effect size.
+
 References
 ----------
+- Shapiro & Wilk (1965) — An analysis of variance test for normality.
+  Biometrika, 52(3–4), 591–611.
 - Mann & Whitney (1947) — On a test of whether one of two random variables is
   stochastically larger than the other.
 - Kruskal & Wallis (1952) — Use of ranks in one-criterion variance analysis.
@@ -24,6 +40,38 @@ from __future__ import annotations
 import numpy as np
 from scipy.stats import mannwhitneyu
 from scipy.stats import kruskal as _kruskal
+from scipy.stats import shapiro as _shapiro
+
+
+def shapiro_wilk(data: np.ndarray, alpha: float = 0.05) -> dict:
+    """
+    Shapiro-Wilk test for normality.
+
+    For n < 50 (e.g., 30 seeds), this is the most statistically powerful
+    normality test available.  Use it *before* choosing between parametric
+    (t-test / ANOVA) and non-parametric (Wilcoxon / Kruskal-Wallis) tests.
+
+    Decision rule:
+        p ≥ alpha  →  fail to reject H₀  →  data is **consistent with normality**
+        p  < alpha  →  reject H₀          →  data is **non-normal** → use
+                                              non-parametric tests
+
+    Parameters
+    ----------
+    data : array-like
+        1-D array of per-seed metric values (e.g., HV or IGD scores).
+    alpha : float
+        Significance threshold (default 0.05).
+
+    Returns
+    -------
+    dict with keys:
+        W_stat  — Shapiro-Wilk W statistic ∈ (0, 1]; closer to 1 is more normal
+        p_value — p-value of the test (float)
+        normal  — True if p_value >= alpha, i.e., normality is *not* rejected
+    """
+    W, p = _shapiro(np.asarray(data, dtype=float))
+    return {"W_stat": float(W), "p_value": float(p), "normal": bool(p >= alpha)}
 
 
 def wilcoxon_ranksum(

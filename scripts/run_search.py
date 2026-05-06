@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-CLI entry point for the proposed MOEA/D + Discrete PSO + SA search.
+CLI entry point for the MemeticNAS MOEA/D + Discrete PSO + SA search.
 
-Runs 5 independent seeds so results are directly comparable with the baselines.
+Runs 30 independent seeds so results are directly comparable with the baselines.
 
 Usage:
     python scripts/run_search.py \
@@ -21,7 +21,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import numpy as np
 
 from src.api.hw_nas_wrapper import HWNASApi
-from src.algorithms.proposed_moead_pso import ProposedMoeadPso
+from src.algorithms.memetic_nas import MemeticNAS
+from src.algorithms.operators import GAOperator, PSOOperator, SAOperator
 from src.utils.logger import get_logger, save_archive
 
 DATA_PATH    = PROJECT_ROOT / "data" / "HW-NAS-Bench-v1_0.pickle"
@@ -33,7 +34,7 @@ TOTAL_BUDGET = 2000   # strict NFE cap — must match baselines
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run ProposedMoeadPso on HW-NAS-Bench.",
+        description="Run MemeticNAS on HW-NAS-Bench.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -128,15 +129,13 @@ def main() -> None:
             "── Seed %d / %d  (budget=%d  K=%d  hardware=%s) ──────────────",
             seed + 1, len(SEEDS), args.budget, args.k_directions, args.hardware,
         )
-        optimizer = ProposedMoeadPso(
+        optimizer = MemeticNAS(
             eval_fn=eval_fn,
             budget=args.budget,
+            candidate_ops=[GAOperator(), PSOOperator(c1=args.c1, c2=args.c2)],
+            sa_op=SAOperator(T0=args.t0, alpha=args.alpha),
             K=args.k_directions,
             T_neighborhood=args.t_neighborhood,
-            T0=args.t0,
-            alpha=args.alpha,
-            c1=args.c1,
-            c2=args.c2,
             rng=np.random.default_rng(seed),
         )
 
@@ -144,7 +143,7 @@ def main() -> None:
         log.info("Seed %d complete. NFE used: %d", seed, optimizer.budget_spent)
 
         metadata = {
-            "algorithm":       "ProposedMoeadPso",
+            "algorithm":       "MemeticNAS",
             "seed":            seed,
             "budget":          args.budget,
             "n_evaluations":   optimizer.budget_spent,
@@ -160,7 +159,7 @@ def main() -> None:
             "c2":              args.c2,
         }
         assert metadata["n_evaluations"] == TOTAL_BUDGET, (
-            f"[ProposedMoeadPso seed={seed}] Evaluation budget mismatch! "
+            f"[MemeticNAS seed={seed}] Evaluation budget mismatch! "
             f"Got {metadata['n_evaluations']}, expected {TOTAL_BUDGET}"
         )
         out_path = RESULTS_DIR / f"proposed_res_seed{seed}.json"

@@ -312,7 +312,117 @@ Weight vectors $w_k$ are periodically redistributed toward the region of highest
 
 Rather than per-edge probabilistic updates, edges are grouped into structural blocks (e.g., input edges $\{0,1\}$, middle edges $\{2,3\}$, output edges $\{4,5\}$). PSO updates are applied block-wise, preserving intra-block co-adaptation and reducing the probability of disrupting functionally coupled edge groups — directly targeting the epistasis problem at its structural source.
 
-## 10. Citation & Acknowledgements
+## 10. Methodology & Scientific Rigor
+
+This section documents the **five-phase evaluation protocol** applied to ensure that all results in this repository meet the standards expected at IEEE / NeurIPS / ICLR venues.  
+The goal is to guarantee that every performance claim is **reproducible**, **unbiased**, and **statistically defensible**.
+
+---
+
+### Phase 1 — Level Playing Field: Budget Fairness (NFE Cap)
+
+**What**: All algorithms (Proposed, NSGA-II, Random Search) are terminated after exactly **2000 NFE** (Number of Function Evaluations).
+
+**Why**: Comparing algorithms by the number of *generations* is misleading — NSGA-II evaluates a whole population per generation, while our method evaluates one architecture per sub-problem per iteration.  
+The only currency that is truly fair is the total count of architecture evaluations, since each evaluation queries the benchmark and thus represents equal computational cost.
+
+Enforced in: `src/algorithms/base_optimizer.py` (`_eval()` raises `BudgetExhausted` at `budget_spent >= 2000`).
+
+---
+
+### Phase 2 — Stochasticity Handling: 30 Independent Seeds
+
+**What**: Every algorithm is executed **30 times** with independent random seeds (`SEEDS = list(range(30))`).
+
+**Why**: Meta-heuristic algorithms are stochastic processes.  A single run result is not a statistic — it is a *sample*.  
+Reporting a single run (as is common in early NAS papers) allows cherry-picking and gives no information about an algorithm's **reliability or variance**.  
+30 seeds provides sufficient statistical power ($1 - \beta \approx 0.8$) for non-parametric tests at $\alpha = 0.05$, matching EC (Evolutionary Computation) community standards.
+
+Scripts: `scripts/run_search.py`, `scripts/run_baselines.py`, `scripts/run_ablations.py`.
+
+---
+
+### Phase 3 — Quantitative Metrics: Hypervolume and IGD
+
+**What**: Each algorithm's Pareto front quality is quantified with two complementary indicators:
+
+**Hypervolume (HV)** — *higher is better*
+
+$$HV(F, r) = \lambda\!\left(\bigcup_{f \in F} [f_1,\, r_1] \times [f_2,\, r_2]\right)$$
+
+HV measures the volume of objective space **dominated** by the found front, relative to a reference point $r = (1.1, 1.1)$ in normalised $[0,1]^2$ space.  
+It rewards fronts that are simultaneously **close to the ideal** and **spread across the full trade-off range**.
+
+**Inverted Generational Distance (IGD)** — *lower is better*
+
+$$IGD(F, P^{\ast}) = \frac{1}{|P^{\ast}|} \sum_{p \in P^{\ast}} \min_{f \in F} \lVert p - f \rVert_2$$
+
+IGD measures how well the approximation front **covers** the proxy reference front $P^{\ast}$, which is constructed as the non-dominated union of all algorithm runs across all seeds.  
+A lower IGD means the algorithm's front is denser and closer to the best-known solutions.
+
+**Why both metrics**: HV rewards coverage of the *dominated space*; IGD rewards *proximity to the reference*.  
+An algorithm can score well on one while failing the other (e.g., a single extreme point inflates HV).  
+Reporting both provides a complete, unbiased picture.
+
+Implementation: `src/analysis/pareto_metrics.py`.
+
+---
+
+### Phase 4 — Statistical Significance: Non-Parametric Tests + Effect Size
+
+Meta-heuristic performance distributions are **rarely Gaussian** (they are bounded, often multi-modal, and affected by premature convergence events).  
+Therefore, all hypothesis testing uses **non-parametric methods**.
+
+#### Step-by-step testing workflow
+
+1. **Normality check** — `shapiro_wilk(data, alpha=0.05)` (Shapiro & Wilk, 1965).  
+   For $n = 30$ seeds, this is the most powerful available normality test.  
+   If *any* algorithm fails ($p < 0.05$), non-parametric tests are used for *all* comparisons.
+
+2. **Omnibus test** — `kruskal_wallis(groups, alpha=0.05)` (Kruskal & Wallis, 1952).  
+   A non-parametric one-way ANOVA on ranks across all $k$ algorithms.  
+   A significant result ($p < 0.05$) confirms that **at least one group differs**; proceed to pairwise tests.
+
+3. **Pairwise post-hoc test** — `wilcoxon_ranksum(proposed, baseline, alpha=0.05)`.  
+   Mann-Whitney U test (equivalent to Wilcoxon rank-sum) for each proposed-vs-baseline pair.  
+   Returns the **rank-biserial correlation** $r$ as the effect size:
+   $$r = 1 - \frac{2U}{n_1 n_2} \in [-1,\, 1]$$
+   Interpretation: $|r| > 0.5$ large, $0.3$–$0.5$ medium, $0.1$–$0.3$ small.
+
+4. **Multiple comparisons correction** — `bonferroni_correction(p_values)`.  
+   With $k$ pairwise tests, the probability of a false positive inflates to $1 - (1-\alpha)^k$.  
+   Bonferroni adjusts each p-value as $p^{\ast}_i = \min(k \cdot p_i,\; 1)$, controlling the **family-wise error rate** (FWER) at $\alpha$.
+
+Implementation: `src/analysis/stats.py`.  
+Applied in: `notebooks/03_algorithm_comparison.ipynb`.
+
+---
+
+### Phase 5 — Internal Validation: Full Component Ablation Study
+
+**What**: Six algorithm configurations are evaluated, each removing one component from the full system:
+
+| ID | Component removed | Hypothesis being tested |
+|----|-------------------|------------------------|
+| T1 | None (full system) | Upper-bound performance |
+| T2 | PSO local refinement | Does PSO contribute beyond GA alone? |
+| T3 | GA global mutation | Does GA contribute beyond PSO alone? |
+| T4 | MOEA/D decomposition ($K=1$) | Does weight-vector decomposition matter? |
+| T5 | Simulated Annealing | Does SA escape local optima? |
+| T6 | Diversity restart | Does restart prevent premature convergence? |
+
+Each configuration runs for **30 seeds × 2000 NFE**.  
+Kruskal-Wallis confirms global differences; pairwise Wilcoxon with Bonferroni correction identifies which components are individually significant.
+
+**Why this is required**: Ablation studies are the gold standard for proving that a proposed algorithm's complexity is **justified** — that no component is redundant and each operator addresses a distinct failure mode.  
+Without ablation, a reviewer cannot distinguish "the whole is greater than the sum of its parts" from "one component does all the work."
+
+Script: `scripts/run_ablations.py`.  
+Analysis: `notebooks/04_ablation_analysis.ipynb`.
+
+---
+
+## 11. Citation & Acknowledgements
 
 If you use this repository in your research, please cite:
 

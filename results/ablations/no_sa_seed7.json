@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "timestamp_utc": "2026-04-29T10:21:50.819443+00:00",
+    "timestamp_utc": "2026-05-06T01:14:17.835795+00:00",
     "n_evaluations": 2000,
     "experiment_name": "no_sa",
     "seed": 7,
@@ -17,8 +17,10 @@
       "alpha": 0.95,
       "c1": 0.5,
       "c2": 0.5,
-      "use_ga": true,
-      "use_pso": true,
+      "candidate_ops": [
+        "GAOperator",
+        "PSOOperator"
+      ],
       "use_sa": false,
       "use_restart": true
     }

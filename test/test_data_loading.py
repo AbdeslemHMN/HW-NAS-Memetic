@@ -44,6 +44,39 @@ class TestHWNASDataLoading(unittest.TestCase):
         self.assertIsInstance(latency, float)
         self.assertGreaterEqual(latency, 0.0)
 
+    def test_hwnas_api_query_all_datasets_and_metrics(self):
+        """All NAS-Bench-201 datasets and hardware metrics must be queryable."""
+        api = HWNASApi(str(self.pickle_path))
+        datasets = [
+            key for key in api.data['nasbench201'].keys()
+            if key != 'config'
+        ]
+        self.assertGreater(len(datasets), 0, "Expected at least one dataset split.")
+
+        sample_config = api.data['nasbench201']['cifar10']['config'][0]
+        sample_arch = api._arch_str_to_tuple(sample_config['arch_str'])
+
+        metrics = [
+            key for key in api.data['nasbench201']['cifar10'].keys()
+            if key != 'config'
+        ]
+        self.assertGreater(len(metrics), 0, "Expected at least one hardware metric.")
+
+        for dataset in datasets:
+            accuracy = api.query_accuracy(sample_arch, dataset=dataset)
+            self.assertIsInstance(accuracy, float)
+            self.assertGreaterEqual(accuracy, 0.0)
+
+            for metric in metrics:
+                latency = api.query(
+                    sample_arch,
+                    device='nasbench201',
+                    dataset=dataset,
+                    metric=metric,
+                )
+                self.assertIsInstance(latency, float)
+                self.assertGreaterEqual(latency, 0.0)
+
     def test_query_too_short_vector_raises_value_error(self):
         """A vector shorter than 6 elements must raise ValueError."""
         api = HWNASApi(str(self.pickle_path))

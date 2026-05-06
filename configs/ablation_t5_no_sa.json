@@ -8,8 +8,7 @@
   "alpha": 0.95,
   "c1": 0.5,
   "c2": 0.5,
-  "use_ga": true,
-  "use_pso": true,
+  "candidate_ops": ["GAOperator", "PSOOperator"],
   "use_sa": false,
   "use_restart": true
 }
