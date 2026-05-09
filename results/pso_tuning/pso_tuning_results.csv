@@ -1,0 +1,5 @@
+rank,name,hv_mean,hv_std,pf_mean,time_s
+1,adaptive_velocity_eta0.10_p0.2,1346.7198,9.2717,17.30,0.61
+2,adaptive_velocity_eta0.10_p0.4,1340.6152,11.4490,16.00,0.55
+3,adaptive_velocity_eta0.05_p0.3,1336.8088,33.7333,17.20,0.5
+4,adaptive_velocity_eta0.10_p0.3,1311.4948,57.1191,16.30,0.55
