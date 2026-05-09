@@ -44,6 +44,12 @@ from src.algorithms.operators.sa_operator import SAOperator
 
 _RESTART_PATIENCE: int = 100   # outer iterations without improvement
 _RESTART_DELTA: float  = 1e-6  # minimum improvement to reset stagnation counter
+_RESTART_SUBPROBLEM_PATIENCE: int = 30
+_RESTART_FRACTION_MAX: float = 0.35
+_SA_ACCEPT_WINDOW: int = 40
+_SA_MIN_TEMP: float = 1e-3
+_SA_REHEAT_FACTOR: float = 1.25
+_SA_REHEAT_TRIGGER: float = 0.15
 
 
 class MemeticNAS(BaseOptimizer):
@@ -110,6 +116,17 @@ class MemeticNAS(BaseOptimizer):
             [np.linspace(1.0, 0.0, K), np.linspace(0.0, 1.0, K)]
         )  # (K, 2)
 
+    def _restart_arch(self, anchor: np.ndarray) -> np.ndarray:
+        """Create a restart candidate by mutating an anchor architecture."""
+        cand = anchor.copy()
+        n_mut = int(self.rng.integers(1, 3))
+        idxs = self.rng.choice(ARCH_LEN, size=n_mut, replace=False)
+        for i in np.atleast_1d(idxs):
+            curr = int(cand[i])
+            options = [o for o in range(OPS_COUNT) if o != curr]
+            cand[i] = int(self.rng.choice(options))
+        return cand
+
     # ── Main search ───────────────────────────────────────────────────────────
 
     def search(self) -> list[dict]:
@@ -151,6 +168,10 @@ class MemeticNAS(BaseOptimizer):
         # ── Restart bookkeeping ────────────────────────────────────────────
         stagnation_counter = 0
         best_score_seen    = float(scores.max())
+        no_improve_steps   = np.zeros(K, dtype=int)
+
+        # ── SA acceptance tracking (for adaptive reheating) ───────────────
+        accepted_history: list[int] = []
 
         # ── Main search loop ───────────────────────────────────────────────
         while self.budget_spent < self.budget:
@@ -195,9 +216,11 @@ class MemeticNAS(BaseOptimizer):
                 # ── Acceptance (SA Metropolis or greedy) ───────────────────
                 if self.sa_op is not None:
                     accepted = self.sa_op.accept(scores[k], best_g, T_sa, self.rng)
-                    T_sa     = self.sa_op.cool(T_sa)
                 else:
                     accepted = best_g > scores[k]
+                accepted_history.append(int(accepted))
+                if len(accepted_history) > _SA_ACCEPT_WINDOW:
+                    accepted_history.pop(0)
 
                 if accepted:
                     current[k] = best_cand.copy()
@@ -209,12 +232,23 @@ class MemeticNAS(BaseOptimizer):
                 if best_g > pbest_scores[k]:
                     pbest[k]        = best_cand.copy()
                     pbest_scores[k] = best_g
+                    no_improve_steps[k] = 0
+                else:
+                    no_improve_steps[k] += 1
 
                 # ── Propagate improvement to neighbourhood ─────────────────
                 for n in neighborhoods[k]:
                     g_n = self._scalarize(weights[n], best_acc_c, best_lat_c)
                     if g_n > self._scalarize(weights[n], accs[n], lats[n]):
                         gbest[n] = best_cand.copy()
+
+            if self.sa_op is not None:
+                # Cool once per outer sweep and keep a non-zero floor so SA remains active.
+                T_sa = max(_SA_MIN_TEMP, self.sa_op.cool(T_sa))
+                if len(accepted_history) == _SA_ACCEPT_WINDOW:
+                    acc_rate = float(np.mean(accepted_history))
+                    if acc_rate < _SA_REHEAT_TRIGGER:
+                        T_sa = min(self.sa_op.T0, max(_SA_MIN_TEMP, T_sa * _SA_REHEAT_FACTOR))
 
             # ── Diversity restart ──────────────────────────────────────────
             if self.use_restart:
@@ -226,15 +260,29 @@ class MemeticNAS(BaseOptimizer):
                     stagnation_counter += 1
 
                 if stagnation_counter >= _RESTART_PATIENCE:
-                    worst_half = np.argsort(scores)[: K // 2]
-                    for k in worst_half:
+                    stale = np.where(no_improve_steps >= _RESTART_SUBPROBLEM_PATIENCE)[0]
+                    if stale.size == 0:
+                        stale = np.argsort(scores)[: max(1, K // 4)]
+                    max_restart = max(1, int(np.ceil(_RESTART_FRACTION_MAX * K)))
+                    restart_idxs = stale[np.argsort(scores[stale])[:max_restart]]
+                    elite_anchor = current[int(np.argmax(scores))].copy()
+
+                    for k in restart_idxs:
                         if self.budget_spent >= self.budget:
                             break
-                        current[k]       = self._random_arch()
+
+                        # Hybrid restart: mostly guided mutations around current elite,
+                        # occasionally full random re-sampling to inject diversity.
+                        if self.rng.random() < 0.7:
+                            current[k] = self._restart_arch(elite_anchor)
+                        else:
+                            current[k] = self._random_arch()
+
                         accs[k], lats[k] = self._eval(current[k])
                         scores[k]        = self._scalarize(weights[k], accs[k], lats[k])
                         pbest[k]         = current[k].copy()
                         pbest_scores[k]  = scores[k]
+                        no_improve_steps[k] = 0
                     stagnation_counter = 0
                     if self.sa_op is not None:
                         T_sa = self.sa_op.T0   # reheat after restart
