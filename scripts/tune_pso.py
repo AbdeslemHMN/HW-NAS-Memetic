@@ -414,12 +414,28 @@ def get_experiments(budget: int) -> list[dict]:
              kwargs=dict(c1=0.3, c2=0.5, w=1/6)),
 
         # ── Adaptive ──────────────────────────────────────────────────────
-        dict(name="adaptive_eta0.05_target0.2",  fn=pso_adaptive,
+        # eta sweep (c1=c2=0.5 fixed)
+        dict(name="adaptive_eta0.05_c0.5_c0.5",    fn=pso_adaptive,
              kwargs=dict(c1=0.5, c2=0.5, eta=0.05)),
-        dict(name="adaptive_eta0.10_target0.2",  fn=pso_adaptive,
+        dict(name="adaptive_eta0.10_c0.5_c0.5 ★",  fn=pso_adaptive,
              kwargs=dict(c1=0.5, c2=0.5, eta=0.10)),
-        dict(name="adaptive_eta0.05_init0.3_0.7", fn=pso_adaptive,
-             kwargs=dict(c1=0.3, c2=0.7, eta=0.05)),
+        dict(name="adaptive_eta0.15_c0.5_c0.5",    fn=pso_adaptive,
+             kwargs=dict(c1=0.5, c2=0.5, eta=0.15)),
+        dict(name="adaptive_eta0.20_c0.5_c0.5",    fn=pso_adaptive,
+             kwargs=dict(c1=0.5, c2=0.5, eta=0.20)),
+        # c1/c2 init sweep (eta=0.10 fixed — best eta)
+        dict(name="adaptive_eta0.10_c0.3_c0.7",    fn=pso_adaptive,
+             kwargs=dict(c1=0.3, c2=0.7, eta=0.10)),
+        dict(name="adaptive_eta0.10_c0.7_c0.3",    fn=pso_adaptive,
+             kwargs=dict(c1=0.7, c2=0.3, eta=0.10)),
+        dict(name="adaptive_eta0.10_c0.2_c0.8",    fn=pso_adaptive,
+             kwargs=dict(c1=0.2, c2=0.8, eta=0.10)),
+        dict(name="adaptive_eta0.10_c0.8_c0.2",    fn=pso_adaptive,
+             kwargs=dict(c1=0.8, c2=0.2, eta=0.10)),
+        dict(name="adaptive_eta0.10_c0.4_c0.6",    fn=pso_adaptive,
+             kwargs=dict(c1=0.4, c2=0.6, eta=0.10)),
+        dict(name="adaptive_eta0.10_c0.6_c0.4",    fn=pso_adaptive,
+             kwargs=dict(c1=0.6, c2=0.4, eta=0.10)),
 
         # ── Block-Wise ────────────────────────────────────────────────────
         dict(name="blockwise_c0.5_c0.5",   fn=pso_blockwise,
