@@ -211,6 +211,82 @@ jupyter notebook notebooks/
 - `01_pareto_front_viz.ipynb` — Pareto front scatter plot + HV/IGD comparison table.
 - `02_epistasis_heatmap.ipynb` — Per-edge brittleness heatmap over top-10 architectures.
 
+## 7.1 GA Operator Variant Comparison (Fassih GA)
+
+This branch adds a full-pipeline comparison of GAOperator variants (T1..T16)
+inside the memetic search loop (GA + PSO + SA). It evaluates each variant on
+real HW-NAS-Bench lookups and reports HV/IGD across seeds.
+
+### Command Examples
+
+Full comparison (all variants, 30 seeds):
+
+```bash
+python scripts/run_ablations.py --compare-ga-full
+```
+
+Full comparison with 15 seeds (lighter):
+
+```bash
+python scripts/run_ablations.py --compare-ga-full --seeds 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14
+```
+
+Subset of variants (e.g., T1..T8 only):
+
+```bash
+python scripts/run_ablations.py --compare-ga-full --ga-variants t1..t8
+```
+
+### Flags (compare-ga-full mode)
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--compare-ga-full` | (off) | Enable GA variant comparison in the full pipeline |
+| `--ga-variants` | `all` | Variant subset: `all`, `t1..t8`, `t9..t16`, or `t1,t3,t10` |
+| `--seeds` | `0..29` | Seed list (space-separated) |
+| `--budget` | `2000` | NFE budget per run |
+| `--k_directions` | `20` | MOEA/D weight vectors $K$ |
+| `--t_neighborhood` | `2` | MOEA/D neighbourhood size $T_n$ |
+| `--t0` | `1.0` | SA initial temperature |
+| `--alpha` | `0.95` | SA cooling rate |
+| `--c1` | `0.5` | PSO personal attraction |
+| `--c2` | `0.5` | PSO global attraction |
+| `--hardware` | `edgegpu_latency` | Hardware metric key |
+| `--dataset` | `cifar10` | NAS-Bench-201 dataset split |
+
+### Outputs
+
+Results are saved to:
+
+```
+results/ga_pipeline_comparison/
+  t1_baseline_seed0.json
+  ...
+  t16_full_fbias_seed29.json
+  ga_pipeline_comparison.png
+  ga_pipeline_convergence.png
+  ga_pipeline_convergence_top.png
+```
+
+### How to Interpret the Results
+
+- **HV (higher is better)**: normalized hypervolume against ref point (1.1, 1.1).
+- **IGD (lower is better)**: distance to a proxy Pareto front built from the
+  union of all variant archives in the current run.
+- **Delta HV**: improvement vs baseline (T1) within that same run.
+- **Pareto**: average number of non-dominated points per seed.
+
+Notes:
+- If you run **subsets** (e.g., T1..T8 separately from T9..T16), each run has a
+  different proxy front, so HV/IGD are **not directly comparable across runs**.
+  For a single global ranking, run all variants together (`--ga-variants all`).
+
+### Plots
+
+- `ga_pipeline_comparison.png` — bar chart of HV/IGD means with error bars.
+- `ga_pipeline_convergence.png` — HV vs NFE for all variants (dense but complete).
+- `ga_pipeline_convergence_top.png` — clearer HV convergence for the top variants.
+
 ## 8. Baselines & Evaluation Metrics
 
 Two baselines are implemented for rigorous comparison:

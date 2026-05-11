@@ -160,6 +160,12 @@ class MemeticNAS(BaseOptimizer):
 
                 gbest[k] = _update_gbest(k)
 
+                for op in self.candidate_ops:
+                    if hasattr(op, "notify_budget"):
+                        op.notify_budget(self.budget_spent, self.budget)
+                    if hasattr(op, "update_archive_stats") and self.budget_spent % 100 == 0:
+                        op.update_archive_stats([e["arch"] for e in self.global_archive])
+
                 # Build a read-only state snapshot for operators.
                 state = MemeticState(
                     current=current,
