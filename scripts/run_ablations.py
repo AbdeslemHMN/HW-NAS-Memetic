@@ -19,6 +19,10 @@ Usage
     python scripts/run_ablations.py --compare-ga-full                  # full 30 seeds
     python scripts/run_ablations.py --compare-ga-full --ga-variants t1..t8
 
+    # GA hyperparameter sweeps anchored to a base T-variant:
+    python scripts/run_ablations.py --compare-ga-hyper --ga-base-variant t16 --ga-hyper-group mutation \
+        --seeds 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14
+
 Expected runtime
 ────────────────
 budget=2000, K=5  →  ~10 s per seed on a modern CPU (lookup-only, no GPU needed).
@@ -90,6 +94,7 @@ GA_PIPELINE_VARIANTS: list[tuple[str, str, dict]] = [
 ]
 
 GA_PIPELINE_RESULTS_DIR = PROJECT_ROOT / "results" / "ga_pipeline_comparison"
+GA_HYPER_RESULTS_DIR = PROJECT_ROOT / "results" / "ga_hyper_comparison"
 
 
 def _select_ga_variants(spec: str) -> list[tuple[str, str, dict]]:
@@ -154,6 +159,82 @@ def _select_ga_variants(spec: str) -> list[tuple[str, str, dict]]:
     return selected
 
 
+def _get_ga_variant_by_tag(tag: str) -> tuple[str, str, dict]:
+    tag = tag.strip().lower()
+    if tag.isdigit():
+        tag = f"t{tag}"
+    if not tag.startswith("t"):
+        tag = f"t{tag}"
+
+    variants = _select_ga_variants(tag)
+    if len(variants) != 1:
+        raise ValueError(f"Expected a single GA variant for tag '{tag}', got {len(variants)}.")
+    return variants[0]
+
+
+def _build_ga_hyper_variants(
+    base_tag: str,
+    group: str,
+) -> tuple[list[tuple[str, str, dict]], Path]:
+    base_name, base_prefix, base_kwargs = _get_ga_variant_by_tag(base_tag)
+    base_key = base_name.split()[0]  # e.g., "T16"
+    base_kwargs = base_kwargs.copy()
+
+    variants: list[tuple[str, str, dict]] = []
+
+    def add(short_name: str, suffix: str, overrides: dict) -> None:
+        kwargs = base_kwargs.copy()
+        kwargs.update(overrides)
+        if kwargs == base_kwargs and short_name != f"BASE_{base_key}":
+            return
+        variants.append((short_name, f"{base_prefix}__{suffix}", kwargs))
+
+    add(f"BASE_{base_key}", "base", {})
+
+    if group in {"mutation", "all"}:
+        pm_values = [
+            (1.0 / 6.0, "1_6"),
+            (2.0 / 6.0, "2_6"),
+            (3.0 / 6.0, "3_6"),
+        ]
+        for pm, tag in pm_values:
+            add(f"PM_{tag}", f"pm_{tag}", {"p_m": pm, "adaptive": False})
+        add("PM_ADAPT", "pm_adapt", {"adaptive": True})
+
+        add("MUT_SINGLE", "mut_single", {"mutation_mode": "single_point", "adaptive": False})
+        add("MUT_MULTI", "mut_multi", {"mutation_mode": "multi_point", "adaptive": False})
+        add("MUT_ALT", "mut_alt", {"mutation_mode": "alternating", "adaptive": False})
+
+        add("OP_UNIFORM", "op_uniform", {"freq_bias": False})
+        add("OP_BIASED", "op_biased", {"freq_bias": True})
+
+    if group in {"crossover", "all"}:
+        add("CX_UNIFORM", "cx_uniform", {"crossover": True, "crossover_type": "uniform"})
+        add("CX_ONE_POINT", "cx_one_point", {"crossover": True, "crossover_type": "one_point"})
+        add("CX_TWO_POINT", "cx_two_point", {"crossover": True, "crossover_type": "two_point"})
+
+        for size in [2, 3, 5]:
+            add(
+                f"PSEL_T{size}",
+                f"psel_t{size}",
+                {"crossover": True, "parent_selection": "tournament", "tournament_size": size},
+            )
+
+        for rate in [0.25, 0.5, 0.75]:
+            tag = str(rate).replace(".", "p")
+            add(
+                f"CX_RATE_{tag}",
+                f"cx_rate_{tag}",
+                {"crossover": True, "crossover_rate": rate},
+            )
+
+    if len(variants) <= 1:
+        raise ValueError("No hyperparameter variants selected.")
+
+    output_dir = GA_HYPER_RESULTS_DIR / f"{base_key.lower()}_{group}"
+    return variants, output_dir
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run ablation experiments defined in configs/.",
@@ -210,6 +291,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--compare-ga-hyper",
+        action="store_true",
+        dest="compare_ga_hyper",
+        help=(
+            "Run GA hyperparameter sweeps (mutation/crossover) anchored to a base T-variant. "
+            "Results saved under results/ga_hyper_comparison/."
+        ),
+    )
+    parser.add_argument(
         "--ga-variants",
         type=str,
         default="all",
@@ -217,6 +307,19 @@ def parse_args() -> argparse.Namespace:
             "Subset of GA variants for --compare-ga-full. "
             "Examples: all, t1..t8, t9..t16, t1,t3,t10"
         ),
+    )
+    parser.add_argument(
+        "--ga-base-variant",
+        type=str,
+        default="t16",
+        help="Base T-variant for --compare-ga-hyper (e.g., t16).",
+    )
+    parser.add_argument(
+        "--ga-hyper-group",
+        type=str,
+        default="all",
+        choices=["mutation", "crossover", "all"],
+        help="Hyperparameter group for --compare-ga-hyper.",
     )
     # Optional pipeline hyperparams (used only with --compare-ga-full)
     parser.add_argument("--c1",             type=float, default=0.5,
@@ -251,10 +354,11 @@ def run_ga_pipeline_comparison(
     k_directions: int,
     t_neighborhood: int,
     variants: list[tuple[str, str, dict]],
+    output_dir: Path,
     log,
 ) -> None:
     """
-    Compare 16 GAOperator variants (T1..T16) inside the full MemeticNAS pipeline
+    Compare GAOperator variants inside the full MemeticNAS pipeline
     (GA + PSO + SA) on real HW-NAS-Bench data.
 
     Metrics (src/analysis/pareto_metrics.py):
@@ -275,7 +379,7 @@ def run_ga_pipeline_comparison(
     )
     import statistics
 
-    GA_PIPELINE_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     W = 102
     log.info("=" * W)
@@ -285,7 +389,7 @@ def run_ga_pipeline_comparison(
     log.info("  PSO      : c1=%.2f  c2=%.2f", c1, c2)
     log.info("  SA       : T0=%.2f  alpha=%.2f", t0, alpha)
     log.info("  MOEA/D   : K=%d  T_neighborhood=%d", k_directions, t_neighborhood)
-    log.info("  Variants : %d   Output: %s", len(variants), GA_PIPELINE_RESULTS_DIR)
+    log.info("  Variants : %d   Output: %s", len(variants), output_dir)
     log.info("=" * W)
 
     # ── Phase 1: run all variants × seeds ─────────────────────────────────
@@ -297,7 +401,7 @@ def run_ga_pipeline_comparison(
         log.info("── Variant: %s", var_name)
 
         for seed in seeds:
-            out_path = GA_PIPELINE_RESULTS_DIR / f"{file_prefix}_seed{seed}.json"
+            out_path = output_dir / f"{file_prefix}_seed{seed}.json"
 
             if out_path.exists():
                 log.info("  [SKIP] seed=%-3d — already exists: %s", seed, out_path.name)
@@ -504,7 +608,7 @@ def run_ga_pipeline_comparison(
         results_summary,
         hv_trends,
         checkpoints,
-        GA_PIPELINE_RESULTS_DIR,
+        output_dir,
         hardware,
         dataset,
     )
@@ -516,7 +620,7 @@ def run_ga_pipeline_comparison(
     print(f"  1. Plug the winning GA variant into run_search.py:")
     print(f"       candidate_ops=[GAOperator({kwargs_str}), PSOOperator(c1={c1}, c2={c2})]")
     print(f"  2. Run: python scripts/run_search.py --hardware {hardware}")
-    print(f"  3. Results saved to: {GA_PIPELINE_RESULTS_DIR}")
+    print(f"  3. Results saved to: {output_dir}")
 
 
 def _plot_ga_pipeline_results(
@@ -771,7 +875,11 @@ def main() -> None:
     api     = HWNASApi(str(DATA_PATH))
     eval_fn = _build_eval_fn(api, args.hardware, args.dataset)
 
-    # ── GA pipeline comparison mode ───────────────────────────────────────
+    # ── GA pipeline comparison modes ──────────────────────────────────────
+    if args.compare_ga_full and args.compare_ga_hyper:
+        log.error("Choose only one of --compare-ga-full or --compare-ga-hyper.")
+        sys.exit(2)
+
     if args.compare_ga_full:
         try:
             variants = _select_ga_variants(args.ga_variants)
@@ -791,6 +899,37 @@ def main() -> None:
             k_directions=args.k_directions,
             t_neighborhood=args.t_neighborhood,
             variants=variants,
+            output_dir=GA_PIPELINE_RESULTS_DIR,
+            log=log,
+        )
+        return  # do not run normal ablation loop
+
+    if args.compare_ga_hyper:
+        if args.seeds == list(range(N_SEEDS)):
+            args.seeds = list(range(15))
+            log.info("Hyper sweep defaulting to 15 seeds (0..14). Use --seeds to override.")
+        try:
+            variants, output_dir = _build_ga_hyper_variants(
+                args.ga_base_variant,
+                args.ga_hyper_group,
+            )
+        except ValueError as exc:
+            log.error("Invalid GA hyper sweep settings: %s", exc)
+            sys.exit(2)
+        run_ga_pipeline_comparison(
+            eval_fn=eval_fn,
+            seeds=args.seeds,
+            budget=args.budget,
+            hardware=args.hardware,
+            dataset=args.dataset,
+            c1=args.c1,
+            c2=args.c2,
+            t0=args.t0,
+            alpha=args.alpha,
+            k_directions=args.k_directions,
+            t_neighborhood=args.t_neighborhood,
+            variants=variants,
+            output_dir=output_dir,
             log=log,
         )
         return  # do not run normal ablation loop

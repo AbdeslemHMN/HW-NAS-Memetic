@@ -52,7 +52,7 @@ Usage (identical interface to original)
 from __future__ import annotations
 
 import math
-from typing import List, Optional
+from typing import List
 
 import numpy as np
 
@@ -89,9 +89,22 @@ class GAOperator(BaseOperator):
         Starting p_m for adaptive schedule (default 3/6 = 0.5).
     p_m_low : float
         Ending p_m for adaptive schedule (default 0.5/6 ≈ 0.083).
+    mutation_mode : str
+        Mutation mode. One of: "multi_point", "single_point", "alternating".
+        Default: "multi_point".
     crossover : bool
         Improvement 3.  Uniform crossover with a random neighbour before
         mutation.  Default: False.
+    crossover_type : str
+        Crossover type when crossover=True. One of: "uniform", "one_point",
+        "two_point". Default: "uniform".
+    crossover_rate : float
+        Probability of applying crossover (0..1). Default: 1.0.
+    parent_selection : str
+        Parent selection strategy for crossover. One of: "random", "tournament".
+        Default: "random".
+    tournament_size : int
+        Tournament size when parent_selection="tournament". Default: 2.
     freq_bias : bool
         Improvement 4.  Frequency-biased replacement sampling.
         Requires update_archive_stats() calls.  Default: False.
@@ -105,7 +118,12 @@ class GAOperator(BaseOperator):
         adaptive: bool = False,
         p_m_high: float = _DEFAULT_P_M_HIGH,
         p_m_low: float = _DEFAULT_P_M_LOW,
+        mutation_mode: str = "multi_point",
         crossover: bool = False,
+        crossover_type: str = "uniform",
+        crossover_rate: float = 1.0,
+        parent_selection: str = "random",
+        tournament_size: int = 2,
         freq_bias: bool = False,
     ) -> None:
         if not 0.0 < p_m <= 1.0:
@@ -114,17 +132,35 @@ class GAOperator(BaseOperator):
             raise ValueError(f"p_m_high must be in (0, 1], got {p_m_high}.")
         if not 0.0 < p_m_low <= 1.0:
             raise ValueError(f"p_m_low must be in (0, 1], got {p_m_low}.")
+        if mutation_mode not in {"multi_point", "single_point", "alternating"}:
+            raise ValueError(f"mutation_mode must be one of multi_point, single_point, alternating; got {mutation_mode}.")
+        if crossover_type not in {"uniform", "one_point", "two_point"}:
+            raise ValueError(f"crossover_type must be one of uniform, one_point, two_point; got {crossover_type}.")
+        if not 0.0 <= crossover_rate <= 1.0:
+            raise ValueError(f"crossover_rate must be in [0, 1], got {crossover_rate}.")
+        if parent_selection not in {"random", "tournament"}:
+            raise ValueError(f"parent_selection must be one of random, tournament; got {parent_selection}.")
+        if tournament_size < 2:
+            raise ValueError(f"tournament_size must be >= 2, got {tournament_size}.")
 
         self.p_m = p_m
         self.force_change = force_change
         self.adaptive = adaptive
         self.p_m_high = p_m_high
         self.p_m_low = p_m_low
+        self.mutation_mode = mutation_mode
         self.crossover = crossover
+        self.crossover_type = crossover_type
+        self.crossover_rate = crossover_rate
+        self.parent_selection = parent_selection
+        self.tournament_size = tournament_size
         self.freq_bias = freq_bias
 
         # Internal state for adaptive schedule
         self._budget_fraction: float = 0.0   # updated by notify_budget()
+
+        # Internal state for alternating mutation mode
+        self._alt_toggle: bool = False
 
         # Internal state for frequency-biased sampling
         # Shape: (N_EDGES, N_OPS) — op counts per edge position
@@ -188,7 +224,8 @@ class GAOperator(BaseOperator):
         parent = state.current[k].copy()
 
         # ── Step 1: Uniform crossover (Improvement 3) ────────────────────
-        base = self._crossover(parent, state, k, rng) if self.crossover else parent
+        do_crossover = self.crossover and rng.random() < self.crossover_rate
+        base = self._crossover(parent, state, k, rng) if do_crossover else parent
 
         # ── Step 2: Mutate ────────────────────────────────────────────────
         pm = self._active_pm()
@@ -227,6 +264,25 @@ class GAOperator(BaseOperator):
         return self.p_m_low + (self.p_m_high - self.p_m_low) * cos_factor
 
     def _mutate(self, arch: np.ndarray, pm: float, rng: np.random.Generator) -> np.ndarray:
+        """Apply mutation according to the configured mutation mode."""
+        mode = self.mutation_mode
+        if mode == "alternating":
+            mode = "single_point" if self._alt_toggle else "multi_point"
+            self._alt_toggle = not self._alt_toggle
+
+        if mode == "single_point":
+            return self._mutate_single_point(arch, rng)
+        return self._mutate_multi_point(arch, pm, rng)
+
+    def _mutate_single_point(self, arch: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        """Mutate exactly one edge."""
+        child = arch.copy()
+        edge = int(rng.integers(0, _N_EDGES))
+        current_op = int(child[edge])
+        child[edge] = self._sample_new_op(edge, current_op, rng)
+        return child
+
+    def _mutate_multi_point(self, arch: np.ndarray, pm: float, rng: np.random.Generator) -> np.ndarray:
         """
         Apply per-gene Bernoulli mutation.
 
@@ -243,14 +299,21 @@ class GAOperator(BaseOperator):
         for edge in range(_N_EDGES):
             if rng.random() < pm:
                 current_op = int(child[edge])
-                # Inverse-frequency weights for ops other than current_op
-                counts = self._op_counts[edge].copy()
-                counts[current_op] = 0.0          # exclude current op
-                inv_w = 1.0 / (counts + 1e-9)
-                inv_w[current_op] = 0.0
-                probs = inv_w / inv_w.sum()
-                child[edge] = int(rng.choice(_N_OPS, p=probs))
+                child[edge] = self._sample_new_op(edge, current_op, rng)
         return child
+
+    def _sample_new_op(self, edge: int, current_op: int, rng: np.random.Generator) -> int:
+        """Sample a replacement op for one edge, honoring freq_bias if enabled."""
+        if not self.freq_bias:
+            ops = [o for o in range(_N_OPS) if o != current_op]
+            return int(rng.choice(ops))
+
+        counts = self._op_counts[edge].copy()
+        counts[current_op] = 0.0
+        inv_w = 1.0 / (counts + 1e-9)
+        inv_w[current_op] = 0.0
+        probs = inv_w / inv_w.sum()
+        return int(rng.choice(_N_OPS, p=probs))
 
     def _crossover(
         self,
@@ -265,19 +328,50 @@ class GAOperator(BaseOperator):
         Each gene is taken from parent (sub-problem k) or a random other
         individual (sub-problem k') with 50/50 probability.
         """
+        donor_idx = self._select_donor_idx(state, k, rng)
+        if donor_idx is None:
+            return parent.copy()
+        donor = state.current[donor_idx]
+
+        if self.crossover_type == "uniform":
+            mask = rng.random(_N_EDGES) < 0.5
+            child = np.where(mask, parent, donor).astype(parent.dtype)
+            return child
+        if self.crossover_type == "one_point":
+            cut = int(rng.integers(1, _N_EDGES))
+            child = parent.copy()
+            child[cut:] = donor[cut:]
+            return child
+        if self.crossover_type == "two_point":
+            cut1 = int(rng.integers(1, _N_EDGES - 1))
+            cut2 = int(rng.integers(cut1 + 1, _N_EDGES))
+            child = parent.copy()
+            child[cut1:cut2] = donor[cut1:cut2]
+            return child
+
+        return parent.copy()
+
+    def _select_donor_idx(
+        self,
+        state: MemeticState,
+        k: int,
+        rng: np.random.Generator,
+    ) -> int | None:
         n = len(state.current)
         if n < 2:
-            return parent.copy()
+            return None
 
-        # Pick a random other sub-problem index
         others = [i for i in range(n) if i != k]
-        k2 = int(rng.choice(others))
-        donor = state.current[k2]
+        if not others:
+            return None
 
-        # Gene-wise coin flip
-        mask = rng.random(_N_EDGES) < 0.5
-        child = np.where(mask, parent, donor).astype(parent.dtype)
-        return child
+        if self.parent_selection == "tournament":
+            size = min(self.tournament_size, len(others))
+            candidates = rng.choice(others, size=size, replace=False)
+            best_idx = max(candidates, key=lambda idx: state.scores[idx])
+            return int(best_idx)
+
+        return int(rng.choice(others))
 
     # ------------------------------------------------------------------
     # Introspection
@@ -297,6 +391,14 @@ class GAOperator(BaseOperator):
             flags.append("adaptive_pm")
         if self.crossover:
             flags.append("crossover")
+        if self.mutation_mode != "multi_point":
+            flags.append(self.mutation_mode)
+        if self.crossover and self.crossover_type != "uniform":
+            flags.append(f"cx_{self.crossover_type}")
+        if self.crossover and self.crossover_rate != 1.0:
+            flags.append(f"cx_rate={self.crossover_rate:.2f}")
+        if self.parent_selection == "tournament":
+            flags.append(f"tourn{self.tournament_size}")
         if self.freq_bias:
             flags.append("freq_bias")
         return "GAOperator[" + (", ".join(flags) if flags else "baseline") + "]"
@@ -304,6 +406,8 @@ class GAOperator(BaseOperator):
     def __repr__(self) -> str:
         return (
             f"GAOperator(p_m={self.p_m:.4f}, force_change={self.force_change}, "
-            f"adaptive={self.adaptive}, crossover={self.crossover}, "
-            f"freq_bias={self.freq_bias})"
+            f"adaptive={self.adaptive}, mutation_mode={self.mutation_mode}, "
+            f"crossover={self.crossover}, crossover_type={self.crossover_type}, "
+            f"crossover_rate={self.crossover_rate}, parent_selection={self.parent_selection}, "
+            f"tournament_size={self.tournament_size}, freq_bias={self.freq_bias})"
         )
