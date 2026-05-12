@@ -2,4 +2,6 @@ venv
 docs
 data
 .github
+logs
 __pycache__
+.agents

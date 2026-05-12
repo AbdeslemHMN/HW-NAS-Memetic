@@ -89,6 +89,14 @@ def parse_args() -> argparse.Namespace:
         "--hardware",
         type=str,
         default=HARDWARE_METRIC,
+        choices=[
+            "edgegpu_latency", "edgegpu_energy",
+            "edgetpu_latency",
+            "eyeriss_latency", "eyeriss_energy", "eyeriss_arithmetic_intensity",
+            "fpga_latency", "fpga_energy",
+            "pixel3_latency",
+            "raspi4_latency",
+        ],
         help="Hardware metric key passed to HWNASApi.query().",
     )
     parser.add_argument(
@@ -209,7 +217,9 @@ def main() -> None:
     eval_fn = _build_eval_fn(api, args.hardware, args.dataset)
 
     # ── Prepare output directory ──────────────────────────────────────────
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    out_dir = RESULTS_DIR / args.dataset / args.hardware
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log.info("Output directory: %s", out_dir)
 
     # ── Load experiment configurations ───────────────────────────────────
     configs = _load_configs(args.config)
@@ -240,7 +250,7 @@ def main() -> None:
                  cfg.get("k_directions", 5), cfg.get("budget", 2000))
 
         for seed in args.seeds:
-            out_path = RESULTS_DIR / f"{exp_name}_seed{seed}.json"
+            out_path = out_dir / f"{exp_name}_seed{seed}.json"
             if out_path.exists():
                 log.info("  [SKIP] seed=%d — result already exists: %s", seed, out_path)
                 completed += 1

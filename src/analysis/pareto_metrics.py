@@ -134,6 +134,52 @@ def calc_igd(
     return float(dists.min(axis=1).mean())
 
 
+def calc_spacing(points: np.ndarray) -> float:
+    """Spacing (S) — standard deviation of nearest-neighbour distances.
+
+    Measures how uniformly the front points are distributed.
+    **Lower is better** (0.0 = perfectly uniform spacing).
+
+    $$S = \\sqrt{\\frac{1}{|F|-1} \\sum_{i=1}^{|F|} (d_i - \\bar{d})^2}$$
+
+    where $d_i = \\min_{j \\neq i} \\|f_i - f_j\\|_2$ is the nearest-neighbour
+    distance for point $i$ and $\\bar{d}$ is the mean over all $d_i$.
+
+    :param points: (N, M) non-dominated front in minimisation space.
+    :return:       Scalar spacing value (lower is better).
+                   Returns ``inf`` if fewer than 2 points are provided.
+    """
+    if len(points) < 2:
+        return float("inf")
+    # pairwise L2 distances — fill diagonal with inf to exclude self
+    diff = points[:, None, :] - points[None, :, :]   # (N, N, M)
+    dist = np.linalg.norm(diff, axis=2)              # (N, N)
+    np.fill_diagonal(dist, np.inf)
+    d_min = dist.min(axis=1)                          # nearest-neighbour dist
+    return float(d_min.std())
+
+
+def calc_max_spread(points: np.ndarray) -> float:
+    """Maximum Spread (MS) — Euclidean distance between extreme front points.
+
+    Measures how widely the algorithm explored the objective space.
+    **Higher is better** — a larger MS means the algorithm covered a broader
+    range of the accuracy/latency trade-off spectrum.
+
+    $$MS = \\|\\max(F) - \\min(F)\\|_2$$
+
+    where $\\max(F)$ and $\\min(F)$ are the component-wise maximum and minimum
+    vectors of the front.
+
+    :param points: (N, M) non-dominated front in minimisation space.
+    :return:       Scalar MS value (higher is better).
+                   Returns 0.0 if fewer than 2 points are provided.
+    """
+    if len(points) < 2:
+        return 0.0
+    return float(np.linalg.norm(points.max(axis=0) - points.min(axis=0)))
+
+
 def proxy_pareto(archives: list[list[dict]]) -> np.ndarray:
     """
     Build a proxy Pareto front P* from the union of multiple run archives.

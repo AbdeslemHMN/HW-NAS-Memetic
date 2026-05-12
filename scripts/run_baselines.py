@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """
-Baseline sweep: RandomSearch and NSGA-II over 5 independent seeds.
+Baseline sweep: RandomSearch and NSGA-II over 30 independent seeds.
 
-Output: results/baselines/{algorithm}_seed{seed}.json
+Output: results/baselines/<dataset>/<hardware>/{algorithm}_seed{seed}.json
+
+Usage:
+    python scripts/run_baselines.py
+    python scripts/run_baselines.py --dataset cifar100 --hardware raspi4_latency
 """
+import argparse
 import sys
 from pathlib import Path
 
@@ -25,10 +30,40 @@ TOTAL_BUDGET = 2000   # strict NFE cap — identical across ALL algorithms
 # NSGA-II budget decomposition: N_pop × (N_gen + 1) = 40 × 50 = 2000
 # (initial population counts as one generation in pymoo's n_eval counter)
 POP_SIZE     = 40    # N_pop — population size
-METRIC       = "edgegpu_latency"   # hardware metric key within nasbench201
-DATASET      = "cifar10"
 
 log = get_logger("baselines")
+
+
+HARDWARE_CHOICES = [
+    "edgegpu_latency", "edgegpu_energy",
+    "edgetpu_latency",
+    "eyeriss_latency", "eyeriss_energy", "eyeriss_arithmetic_intensity",
+    "fpga_latency", "fpga_energy",
+    "pixel3_latency",
+    "raspi4_latency",
+]
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run RandomSearch and NSGA-II baselines on HW-NAS-Bench.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="cifar10",
+        choices=["cifar10", "cifar100", "ImageNet16-120"],
+        help="NAS-Bench-201 dataset split.",
+    )
+    parser.add_argument(
+        "--hardware",
+        type=str,
+        default="edgegpu_latency",
+        choices=HARDWARE_CHOICES,
+        help="Hardware metric key from HW-NAS-Bench.",
+    )
+    return parser.parse_args()
 
 
 def build_eval_fn(api: HWNASApi, metric: str, dataset: str):
@@ -42,9 +77,14 @@ def build_eval_fn(api: HWNASApi, metric: str, dataset: str):
 
 
 def main() -> None:
+    args = parse_args()
     log.info("Loading HW-NAS-Bench from %s", DATA_PATH)
     api = HWNASApi(str(DATA_PATH))  # auto-detects nas201_accuracy_cache.npz if present
-    eval_fn = build_eval_fn(api, METRIC, DATASET)
+    eval_fn = build_eval_fn(api, args.hardware, args.dataset)
+
+    out_dir = RESULTS_DIR / args.dataset / args.hardware
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log.info("Output directory: %s", out_dir)
 
     # ── RandomSearch ─────────────────────────────────────────────────────────
     for seed in SEEDS:
@@ -58,14 +98,14 @@ def main() -> None:
             "n_evaluations":   rs.budget_spent,
             "budget_spent":    rs.budget_spent,
             "nfe_checkpoints": rs.nfe_checkpoints,
-            "metric":          METRIC,
-            "dataset":         DATASET,
+            "hardware":        args.hardware,
+            "dataset":         args.dataset,
         }
         assert metadata["n_evaluations"] == TOTAL_BUDGET, (
             f"[RandomSearch seed={seed}] Evaluation budget mismatch! "
             f"Got {metadata['n_evaluations']}, expected {TOTAL_BUDGET}"
         )
-        out_path = RESULTS_DIR / f"random_search_seed{seed}.json"
+        out_path = out_dir / f"random_search_seed{seed}.json"
         save_archive(archive, out_path, metadata=metadata)
         log.info("[RandomSearch] seed=%d → %s", seed, out_path)
 
@@ -82,19 +122,19 @@ def main() -> None:
             "n_evaluations":   len(archive),
             "budget_spent":    len(archive),
             "nfe_checkpoints": nfe_checkpoints,
-            "metric":          METRIC,
-            "dataset":         DATASET,
+            "hardware":        args.hardware,
+            "dataset":         args.dataset,
             "pop_size":        POP_SIZE,
         }
         assert metadata["n_evaluations"] == TOTAL_BUDGET, (
             f"[NSGA2 seed={seed}] Evaluation budget mismatch! "
             f"Got {metadata['n_evaluations']}, expected {TOTAL_BUDGET}"
         )
-        out_path = RESULTS_DIR / f"nsga2_seed{seed}.json"
+        out_path = out_dir / f"nsga2_seed{seed}.json"
         save_archive(archive, out_path, metadata=metadata)
         log.info("[NSGA2] seed=%d → %s", seed, out_path)
 
-    log.info("Baseline sweep complete. Results in %s", RESULTS_DIR)
+    log.info("Baseline sweep complete. Results in %s", out_dir)
 
 
 if __name__ == "__main__":

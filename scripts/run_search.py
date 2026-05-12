@@ -41,7 +41,15 @@ def parse_args() -> argparse.Namespace:
         "--hardware",
         type=str,
         default="edgegpu_latency",
-        help="Hardware metric key (e.g. edgegpu_latency, raspi4_latency).",
+        choices=[
+            "edgegpu_latency", "edgegpu_energy",
+            "edgetpu_latency",
+            "eyeriss_latency", "eyeriss_energy", "eyeriss_arithmetic_intensity",
+            "fpga_latency", "fpga_energy",
+            "pixel3_latency",
+            "raspi4_latency",
+        ],
+        help="Hardware metric key from HW-NAS-Bench.",
     )
     parser.add_argument(
         "--budget",
@@ -122,7 +130,8 @@ def main() -> None:
     api = HWNASApi(str(DATA_PATH))  # auto-detects nas201_accuracy_cache.npz if present
     eval_fn = build_eval_fn(api, args.hardware, args.dataset)
 
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    out_dir = RESULTS_DIR / args.dataset / args.hardware
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     for seed in SEEDS:
         log.info(
@@ -162,11 +171,11 @@ def main() -> None:
             f"[MemeticNAS seed={seed}] Evaluation budget mismatch! "
             f"Got {metadata['n_evaluations']}, expected {TOTAL_BUDGET}"
         )
-        out_path = RESULTS_DIR / f"proposed_res_seed{seed}.json"
+        out_path = out_dir / f"proposed_res_seed{seed}.json"
         save_archive(archive, out_path, metadata=metadata)
         log.info("Results written → %s", out_path)
 
-    log.info("All %d seeds complete. Results in %s", len(SEEDS), RESULTS_DIR)
+    log.info("All %d seeds complete. Results in %s", len(SEEDS), out_dir)
 
 
 if __name__ == "__main__":

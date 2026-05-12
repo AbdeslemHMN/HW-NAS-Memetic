@@ -64,6 +64,14 @@ def parse_args() -> argparse.Namespace:
         "--hardware",
         type=str,
         default=HARDWARE,
+        choices=[
+            "edgegpu_latency", "edgegpu_energy",
+            "edgetpu_latency",
+            "eyeriss_latency", "eyeriss_energy", "eyeriss_arithmetic_intensity",
+            "fpga_latency", "fpga_energy",
+            "pixel3_latency",
+            "raspi4_latency",
+        ],
         help="Hardware latency metric key (e.g. edgegpu_latency, raspi4_latency).",
     )
     parser.add_argument(
@@ -144,7 +152,9 @@ def main() -> None:
     api     = HWNASApi(str(DATA_PATH))
     eval_fn = build_eval_fn(api, args.hardware, args.dataset)
 
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    out_dir = RESULTS_DIR / args.dataset / args.hardware
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log.info("Output directory: %s", out_dir)
 
     log.info(
         "Incremental build — seed=%d  hardware=%s  budget=%d",
@@ -164,7 +174,7 @@ def main() -> None:
         hardware=args.hardware,
         dataset=args.dataset,
         extra_meta={},
-        out_path=RESULTS_DIR / "stage1_random.json",
+        out_path=out_dir / "stage1_random.json",
         log=log,
     )
 
@@ -184,7 +194,7 @@ def main() -> None:
         hardware=args.hardware,
         dataset=args.dataset,
         extra_meta={"K": K, "operators": ["GA"]},
-        out_path=RESULTS_DIR / "stage2_moead_ga.json",
+        out_path=out_dir / "stage2_moead_ga.json",
         log=log,
     )
 
@@ -204,7 +214,7 @@ def main() -> None:
         hardware=args.hardware,
         dataset=args.dataset,
         extra_meta={"K": K, "operators": ["GA", "PSO"]},
-        out_path=RESULTS_DIR / "stage3_moead_ga_pso.json",
+        out_path=out_dir / "stage3_moead_ga_pso.json",
         log=log,
     )
 
@@ -224,11 +234,11 @@ def main() -> None:
         hardware=args.hardware,
         dataset=args.dataset,
         extra_meta={"K": K, "operators": ["GA", "PSO", "SA"], "T0": 1.0, "alpha": 0.95},
-        out_path=RESULTS_DIR / "stage4_full.json",
+        out_path=out_dir / "stage4_full.json",
         log=log,
     )
 
-    log.info("All four stages complete. Results in %s", RESULTS_DIR)
+    log.info("All four stages complete. Results in %s", out_dir)
 
 
 if __name__ == "__main__":
