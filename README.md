@@ -95,7 +95,6 @@ This centralizes search parameterization and keeps the proposed search reproduci
 The diagram below is derived directly from `MemeticNAS.search()`, `GAOperator.apply()`, `PSOOperator.apply()`, and `SAOperator.step()`.
 
 ```mermaid
-%%{init: {'themeVariables': {'fontSize': '18px', 'nodeTextSize': 18, 'primaryBorderColor': '#000000', 'edgeLabelBackground':'#ffffff', 'clusterBkg': '#f9f9f9'}}}%%
 flowchart TD
 classDef init fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px,color:#000
 classDef operator fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#000
@@ -103,26 +102,26 @@ classDef sa fill:#fce4ec,stroke:#c2185b,stroke-width:2px,color:#000
 classDef decision fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#000
 classDef archive fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#000
 classDef standard fill:#ffffff,stroke:#757575,stroke-width:1px,color:#000
-style Start fill:#ffffff,stroke:#757575,stroke-width:2px,width:300px,height:90px,padding:20px
-style Archive fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,width:340px,height:90px,padding:20px
-style Budget fill:#ffffff,stroke:#757575,stroke-width:2px,width:320px,height:90px,padding:20px
-style SubLoopStart fill:#ffffff,stroke:#757575,stroke-width:2px,width:340px,height:90px,padding:20px
-style SelectBest fill:#ffffff,stroke:#757575,stroke-width:2px,width:340px,height:90px,padding:20px
-style Metropolis fill:#fff3e0,stroke:#f57c00,stroke-width:2px,width:320px,height:90px,padding:20px
-style CheckPBest fill:#fff3e0,stroke:#f57c00,stroke-width:2px,width:320px,height:90px,padding:20px
-style NextK fill:#fff3e0,stroke:#f57c00,stroke-width:2px,width:320px,height:90px,padding:20px
-style RestartCheck fill:#fff3e0,stroke:#f57c00,stroke-width:2px,width:320px,height:90px,padding:20px
-style W fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px,width:340px,height:90px,padding:20px
-style Nb fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px,width:300px,height:90px,padding:20px
-style Pop fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px,width:340px,height:90px,padding:20px
-style EvalInit fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px,width:340px,height:90px,padding:20px
-style GA fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,width:320px,height:90px,padding:20px
-style PSO fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,width:320px,height:90px,padding:20px
-style Acc fill:#fce4ec,stroke:#c2185b,stroke-width:2px,width:320px,height:90px,padding:20px
-style Rej fill:#fce4ec,stroke:#c2185b,stroke-width:2px,width:320px,height:90px,padding:20px
-style UpPBest fill:#ffffff,stroke:#757575,stroke-width:2px,width:320px,height:90px,padding:20px
-style Propagate fill:#ffffff,stroke:#757575,stroke-width:2px,width:360px,height:90px,padding:20px
-style Reinit fill:#ffffff,stroke:#757575,stroke-width:2px,width:340px,height:90px,padding:20px
+style Start fill:#ffffff,stroke:#757575,stroke-width:2px,width:380px,height:110px,padding:20px
+style Archive fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,width:420px,height:110px,padding:20px
+style Budget fill:#ffffff,stroke:#757575,stroke-width:2px,width:380px,height:110px,padding:20px
+style SubLoopStart fill:#ffffff,stroke:#757575,stroke-width:2px,width:420px,height:110px,padding:20px
+style SelectBest fill:#ffffff,stroke:#757575,stroke-width:2px,width:420px,height:110px,padding:20px
+style Metropolis fill:#fff3e0,stroke:#f57c00,stroke-width:2px,width:380px,height:110px,padding:20px
+style CheckPBest fill:#fff3e0,stroke:#f57c00,stroke-width:2px,width:380px,height:110px,padding:20px
+style NextK fill:#fff3e0,stroke:#f57c00,stroke-width:2px,width:380px,height:110px,padding:20px
+style RestartCheck fill:#fff3e0,stroke:#f57c00,stroke-width:2px,width:380px,height:110px,padding:20px
+style W fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px,width:420px,height:110px,padding:20px
+style Nb fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px,width:360px,height:110px,padding:20px
+style Pop fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px,width:420px,height:110px,padding:20px
+style EvalInit fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px,width:420px,height:110px,padding:20px
+style GA fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,width:380px,height:110px,padding:20px
+style PSO fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,width:380px,height:110px,padding:20px
+style Acc fill:#fce4ec,stroke:#c2185b,stroke-width:2px,width:380px,height:110px,padding:20px
+style Rej fill:#fce4ec,stroke:#c2185b,stroke-width:2px,width:380px,height:110px,padding:20px
+style UpPBest fill:#ffffff,stroke:#757575,stroke-width:2px,width:380px,height:110px,padding:20px
+style Propagate fill:#ffffff,stroke:#757575,stroke-width:2px,width:460px,height:110px,padding:20px
+style Reinit fill:#ffffff,stroke:#757575,stroke-width:2px,width:420px,height:110px,padding:20px
 
 Start([Initialize Search])
 Archive[(Global Pareto Archive)]
