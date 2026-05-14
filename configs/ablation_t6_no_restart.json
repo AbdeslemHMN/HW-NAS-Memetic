@@ -1,14 +1,27 @@
 {
   "experiment_name": "no_restart",
-  "description": "T6 — Ablation: Diversity restart disabled. Population is never reinitialised when stagnation is detected. Measures restart's contribution to escaping premature convergence.",
+  "description": "T6 \u2014 Ablation: Diversity restart disabled. Population is never reinitialised when stagnation is detected. Measures restart's contribution to escaping premature convergence.",
   "budget": 2000,
   "k_directions": 5,
   "t_neighborhood": 2,
-  "t0": 1.0,
+  "t0": 0.1,
   "alpha": 0.95,
-  "c1": 0.5,
-  "c2": 0.5,
-  "candidate_ops": ["GAOperator", "PSOOperator"],
+  "candidate_ops": [
+    "GAOperator",
+    "PSOOperator"
+  ],
   "use_sa": true,
-  "use_restart": false
+  "use_restart": false,
+  "scalarization": "linear",
+  "sa_t_min": 0.001,
+  "sa_reheat_factor": 1.25,
+  "sa_reheat_trigger": 0.15,
+  "ga_force_change": true,
+  "ga_crossover": true,
+  "ga_freq_bias": true,
+  "ga_adaptive": false,
+  "c1_init": 0.4,
+  "c2_init": 0.6,
+  "pso_eta": 0.1,
+  "pso_target_rate": 0.2
 }

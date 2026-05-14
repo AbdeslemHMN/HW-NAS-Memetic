@@ -1,0 +1,209 @@
+{
+  "_description": "Best hyperparameters per component, found via systematic sweep. Use these to construct the optimised full-pipeline config and to compare all combinations.",
+  "_sweep_protocol": "5 seeds, 1000 NFE, edgegpu_latency / cifar10 unless noted otherwise.",
+
+  "pso_operator": {
+    "_module": "src.algorithms.operators.pso_operator.PSOOperator",
+    "_improvement": "+18.0% HV over fixed-coefficient baseline, -98.9% variance",
+    "_sweep": "18 variants, 5 seeds, 1000 NFE — edgegpu_latency / cifar10",
+    "best": {
+      "rank": 1,
+      "c1_init": 0.4,
+      "c2_init": 0.6,
+      "eta": 0.10,
+      "target_rate": 0.20,
+      "c_min": 0.05,
+      "c_max": 0.95,
+      "window": 20,
+      "hv_mean": 1353.1647,
+      "hv_std": 4.8582,
+      "pf_mean": 17.50,
+      "time_s": 0.36
+    },
+    "top4": [
+      {"rank": 1, "c1_init": 0.4, "c2_init": 0.6, "eta": 0.10, "hv_mean": 1353.1647, "hv_std": 4.8582},
+      {"rank": 2, "c1_init": 0.5, "c2_init": 0.5, "eta": 0.15, "hv_mean": 1351.5057, "hv_std": 4.6448},
+      {"rank": 3, "c1_init": 0.6, "c2_init": 0.4, "eta": 0.10, "hv_mean": 1349.6250, "hv_std": 4.2043},
+      {"rank": 4, "c1_init": 0.2, "c2_init": 0.8, "eta": 0.10, "hv_mean": 1349.4495, "hv_std": 6.7034}
+    ],
+    "baseline": {
+      "c1": 0.5,
+      "c2": 0.5,
+      "adaptive": false,
+      "hv_mean": 1148,
+      "hv_std": 94,
+      "rank": "14/18"
+    }
+  },
+
+  "ga_operator": {
+    "_module": "src.algorithms.operators.ga_operator.GAOperator",
+    "_improvement": "+1.3% HV over baseline, -65% variance (T14 vs T1)",
+    "_sweep": "16 variants, 15 seeds, 1000 NFE — edgegpu_latency / cifar10",
+    "best": {
+      "variant": "T14",
+      "label": "force_change + crossover + freq_bias",
+      "p_m": 0.16667,
+      "force_change": true,
+      "adaptive": false,
+      "crossover": true,
+      "crossover_rate": 1.0,
+      "parent_selection": "random",
+      "freq_bias": true,
+      "hv_mean": 0.8660,
+      "hv_std": 0.0035,
+      "igd_mean": 0.0011,
+      "igd_std": 0.0004,
+      "pf_mean": 647.3,
+      "seeds": 15,
+      "note": "Best HV. Also T6 (force_change+crossover) has best IGD=0.0011 with less complexity."
+    },
+    "runner_up": {
+      "variant": "T6",
+      "label": "force_change + crossover",
+      "force_change": true,
+      "adaptive": false,
+      "crossover": true,
+      "freq_bias": false,
+      "hv_mean": 0.8653,
+      "hv_std": 0.0048,
+      "igd_mean": 0.0011,
+      "igd_std": 0.0006,
+      "note": "Best IGD, simpler than T14, no archive stats hook needed."
+    },
+    "all_variants": [
+      {"variant": "T1",  "flags": [],                                              "hv_mean": 0.8550, "hv_std": 0.0101, "igd_mean": 0.0023},
+      {"variant": "T2",  "flags": ["force_change"],                                "hv_mean": 0.8551, "hv_std": 0.0131, "igd_mean": 0.0023},
+      {"variant": "T3",  "flags": ["adaptive_pm"],                                 "hv_mean": 0.8536, "hv_std": 0.0108, "igd_mean": 0.0029},
+      {"variant": "T4",  "flags": ["crossover"],                                   "hv_mean": 0.8533, "hv_std": 0.0218, "igd_mean": 0.0024},
+      {"variant": "T5",  "flags": ["force_change", "adaptive_pm"],                 "hv_mean": 0.8603, "hv_std": 0.0076, "igd_mean": 0.0019},
+      {"variant": "T6",  "flags": ["force_change", "crossover"],                   "hv_mean": 0.8653, "hv_std": 0.0048, "igd_mean": 0.0011},
+      {"variant": "T7",  "flags": ["adaptive_pm", "crossover"],                    "hv_mean": 0.8543, "hv_std": 0.0133, "igd_mean": 0.0021},
+      {"variant": "T8",  "flags": ["force_change", "adaptive_pm", "crossover"],    "hv_mean": 0.8573, "hv_std": 0.0128, "igd_mean": 0.0022},
+      {"variant": "T9",  "flags": ["freq_bias"],                                   "hv_mean": 0.8311, "hv_std": 0.0205, "igd_mean": 0.0118},
+      {"variant": "T10", "flags": ["force_change", "freq_bias"],                   "hv_mean": 0.8527, "hv_std": 0.0096, "igd_mean": 0.0027},
+      {"variant": "T11", "flags": ["adaptive_pm", "freq_bias"],                    "hv_mean": 0.8335, "hv_std": 0.0200, "igd_mean": 0.0103},
+      {"variant": "T12", "flags": ["crossover", "freq_bias"],                      "hv_mean": 0.8639, "hv_std": 0.0081, "igd_mean": 0.0013},
+      {"variant": "T13", "flags": ["force_change", "adaptive_pm", "freq_bias"],    "hv_mean": 0.8408, "hv_std": 0.0171, "igd_mean": 0.0047},
+      {"variant": "T14", "flags": ["force_change", "crossover", "freq_bias"],      "hv_mean": 0.8660, "hv_std": 0.0035, "igd_mean": 0.0011},
+      {"variant": "T15", "flags": ["adaptive_pm", "crossover", "freq_bias"],       "hv_mean": 0.8628, "hv_std": 0.0057, "igd_mean": 0.0015},
+      {"variant": "T16", "flags": ["force_change", "adaptive_pm", "crossover", "freq_bias"], "hv_mean": 0.8628, "hv_std": 0.0089, "igd_mean": 0.0014}
+    ],
+    "baseline": {
+      "variant": "T1",
+      "p_m": 0.16667,
+      "force_change": false,
+      "adaptive": false,
+      "crossover": false,
+      "freq_bias": false,
+      "hv_mean": 0.8550,
+      "hv_std": 0.0101
+    }
+  },
+
+  "sa_operator": {
+    "_module": "src.algorithms.operators.sa_operator.SAOperator",
+    "_improvement": "Adaptive reheating + T_min floor prevent temperature collapse",
+    "_sweep": "4 presets, 5 seeds, 10000 NFE — edgegpu_latency / cifar10",
+    "best": {
+      "preset": "P1",
+      "name": "SA off, restart off",
+      "use_sa": false,
+      "use_restart": false,
+      "sa_t0": null,
+      "sa_alpha": null,
+      "acc_mean": 94.373337,
+      "lat_mean": 6.791177,
+      "note": "Best overall. SA and restart both OFF gives best accuracy+latency."
+    },
+    "best_with_sa": {
+      "preset": "P3",
+      "name": "SA on (T0=0.25), restart off",
+      "use_sa": true,
+      "use_restart": false,
+      "T0": 0.25,
+      "alpha": 0.95,
+      "T_min": 0.001,
+      "accept_window": 40,
+      "reheat_factor": 1.25,
+      "reheat_trigger": 0.15,
+      "acc_mean": 94.373337,
+      "lat_mean": 6.794976,
+      "note": "Best when SA is required (ablation). T0=0.25 outperforms T0=0.50."
+    },
+    "all_presets": [
+      {"preset": "P1", "use_sa": false, "use_restart": false, "sa_t0": null,  "acc_mean": 94.373337, "lat_mean": 6.791177},
+      {"preset": "P2", "use_sa": false, "use_restart": true,  "sa_t0": null,  "acc_mean": 94.373337, "lat_mean": 6.791177},
+      {"preset": "P3", "use_sa": true,  "use_restart": false, "sa_t0": 0.25,  "acc_mean": 94.373337, "lat_mean": 6.794976},
+      {"preset": "P4", "use_sa": true,  "use_restart": false, "sa_t0": 0.50,  "acc_mean": 94.373337, "lat_mean": 6.794976}
+    ]
+  },
+
+  "moead_framework": {
+    "_module": "src.algorithms.memetic_nas.MemeticNAS",
+    "_improvement": "Scalarization + K + T_neighborhood tuned; Tchebychev added for non-convex fronts",
+    "_sweep": "24 configs × 3 datasets × 3 seeds = 216 runs, 2000 NFE/run — edgegpu / cifar10 + cifar100 + ImageNet16-120",
+    "_anomaly_note": "75/216 runs show negative HV_gap (HV > theoretical). Cause: dynamic ref-point (min(front)*0.9) differs between found and theoretical fronts — normalisation artefact, not an algorithm bug.",
+
+    "best_universal": {
+      "K": 10,
+      "scalarization": "linear",
+      "T_neighborhood": 2,
+      "alpha": 0.95,
+      "hv_global_delta": "+11.6 above global mean (1685.96)",
+      "note": "K10-Lin-T2-a0.95. Best compromise across all 3 datasets. IGD and stability also competitive."
+    },
+
+    "best_per_dataset": {
+      "cifar10": {
+        "config": "K5-Lin-T2-a0.95",
+        "K": 5, "scalarization": "linear", "T_neighborhood": 2, "alpha": 0.95,
+        "hv_mean": 2409.9, "hv_std": 122.7, "igd_mean": 1.010, "nd_mean": 20.0,
+        "stability": "medium",
+        "note": "Highest HV but std=122 — seed-sensitive. K10-Lin-T2 is safer with only marginal HV loss."
+      },
+      "cifar100": {
+        "config": "K5-Tch-T5-a0.95",
+        "K": 5, "scalarization": "tchebychev", "T_neighborhood": 5, "alpha": 0.95,
+        "hv_mean": 1940.4, "hv_std": 33.5, "igd_mean": 0.934, "nd_mean": 15.0,
+        "stability": "good",
+        "note": "Only dataset where Tchebychev wins (+6.6% vs best linear). cifar100 has a non-convex front. Best IGD for cifar100: K10-Tch-T5-a0.99 (0.780)."
+      },
+      "ImageNet16-120": {
+        "config": "K10-Lin-T2-a0.95",
+        "K": 10, "scalarization": "linear", "T_neighborhood": 2, "alpha": 0.95,
+        "hv_mean": 1186.5, "hv_std": 53.2, "igd_mean": 0.334, "nd_mean": 23.7,
+        "stability": "best (CV=4.5%)",
+        "note": "Most stable dataset. Positive HV_gap=+88.4 → room to improve with larger budget or more seeds."
+      }
+    },
+
+    "parameter_importance": {
+      "_note": "Effect on global HV mean (1685.96). Ranking: T > Scalarization > K > alpha.",
+      "T_neighborhood": {"T2": 25.3, "T5": -25.3},
+      "scalarization":  {"linear": 20.9, "tchebychev": -20.9},
+      "K":              {"K5": -20.4, "K10": 11.6, "K20": 8.8},
+      "alpha":          {"a0.95": -2.0, "a0.99": 2.0, "_note": "Negligible — alpha does not matter at budget=2000."}
+    },
+
+    "all_configs_top10": [
+      {"config": "K5-Lin-T2-a0.95",  "dataset": "cifar10",       "hv_mean": 2409.9, "hv_std": 122.7, "igd_mean": 1.010, "nd_mean": 20.0},
+      {"config": "K5-Lin-T2-a0.99",  "dataset": "cifar10",       "hv_mean": 2409.9, "hv_std": 122.7, "igd_mean": 1.010, "nd_mean": 20.0},
+      {"config": "K10-Lin-T2-a0.95", "dataset": "cifar10",       "hv_mean": 2342.2, "hv_std": 123.7, "igd_mean": 0.405, "nd_mean": 21.7},
+      {"config": "K5-Tch-T5-a0.95",  "dataset": "cifar100",      "hv_mean": 1940.4, "hv_std": 33.5,  "igd_mean": 0.934, "nd_mean": 15.0},
+      {"config": "K10-Tch-T5-a0.99", "dataset": "cifar100",      "hv_mean": 1799.0, "hv_std": 43.4,  "igd_mean": 0.780, "nd_mean": 15.3},
+      {"config": "K10-Lin-T2-a0.95", "dataset": "ImageNet16-120","hv_mean": 1186.5, "hv_std": 53.2,  "igd_mean": 0.334, "nd_mean": 23.7},
+      {"config": "K10-Lin-T2-a0.99", "dataset": "ImageNet16-120","hv_mean": 1186.5, "hv_std": 53.2,  "igd_mean": 0.334, "nd_mean": 23.7}
+    ],
+
+    "heatmap_key_cells": {
+      "K_alpha":    {"K10_a099": 1707.2, "note": "Darkest cell — best K×alpha combo"},
+      "T_scalar":   {"T2_linear": 1731.0, "note": "Dominant combination"}
+    },
+
+    "baseline": {
+      "K": 20, "scalarization": "linear", "T_neighborhood": 2, "alpha": 0.95,
+      "note": "Original default (K=20). K=10 is strictly better."
+    }
+  }
+}

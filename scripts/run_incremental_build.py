@@ -46,7 +46,7 @@ RESULTS_DIR  = PROJECT_ROOT / "results" / "incremental"
 TOTAL_BUDGET = 2000
 HARDWARE     = "edgegpu_latency"
 DATASET      = "cifar10"
-K            = 20
+K            = 5      # calibrated best (was 20)
 
 
 def parse_args() -> argparse.Namespace:
@@ -184,7 +184,12 @@ def main() -> None:
         optimizer=MemeticNAS(
             eval_fn=eval_fn,
             budget=args.budget,
-            candidate_ops=[GAOperator()],
+            candidate_ops=[GAOperator(
+                force_change=True,
+                crossover=True,
+                freq_bias=True,
+                adaptive=False,
+            )],
             sa_op=None,
             K=K,
             rng=np.random.default_rng(args.seed),
@@ -204,7 +209,21 @@ def main() -> None:
         optimizer=MemeticNAS(
             eval_fn=eval_fn,
             budget=args.budget,
-            candidate_ops=[GAOperator(), PSOOperator()],
+            candidate_ops=[
+                GAOperator(
+                    force_change=True,
+                    crossover=True,
+                    freq_bias=True,
+                    adaptive=False,
+                ),
+                PSOOperator(
+                    K=K,
+                    c1_init=0.4,
+                    c2_init=0.6,
+                    eta=0.10,
+                    target_rate=0.20,
+                ),
+            ],
             sa_op=None,
             K=K,
             rng=np.random.default_rng(args.seed),
@@ -224,8 +243,28 @@ def main() -> None:
         optimizer=MemeticNAS(
             eval_fn=eval_fn,
             budget=args.budget,
-            candidate_ops=[GAOperator(), PSOOperator()],
-            sa_op=SAOperator(T0=1.0, alpha=0.95),
+            candidate_ops=[
+                GAOperator(
+                    force_change=True,
+                    crossover=True,
+                    freq_bias=True,
+                    adaptive=False,
+                ),
+                PSOOperator(
+                    K=K,
+                    c1_init=0.4,
+                    c2_init=0.6,
+                    eta=0.10,
+                    target_rate=0.20,
+                ),
+            ],
+            sa_op=SAOperator(
+                T0=0.1,
+                alpha=0.95,
+                T_min=0.001,
+                reheat_factor=1.25,
+                reheat_trigger=0.15,
+            ),
             K=K,
             rng=np.random.default_rng(args.seed),
         ),
@@ -233,7 +272,12 @@ def main() -> None:
         seed=args.seed,
         hardware=args.hardware,
         dataset=args.dataset,
-        extra_meta={"K": K, "operators": ["GA", "PSO", "SA"], "T0": 1.0, "alpha": 0.95},
+        extra_meta={
+            "K": K,
+            "operators": ["GA", "PSO", "SA"],
+            "T0": 0.1,
+            "alpha": 0.95,
+        },
         out_path=out_dir / "stage4_full.json",
         log=log,
     )

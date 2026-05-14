@@ -2,13 +2,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # run_full_pipeline.sh  —  HW-NAS-Memetic end-to-end research pipeline
 #
-# Runs a full 3-dataset × N-hardware sweep:
+# Runs a full 3-dataset × 3-hardware sweep:
 #   1. Data health-check
 #   2. Proposed search   (run_search.py)
 #   3. Baselines         (run_baselines.py)
 #   4. Ablation study    (run_ablations.py)
 #   5. Incremental build (run_incremental_build.py)
-#   6. Headless notebook execution (nbconvert)
 #
 # All per-run stdout+stderr are captured to:
 #   logs/<dataset>/<hardware>/<script>_<TIMESTAMP>.log
@@ -17,7 +16,6 @@
 #   chmod +x run_full_pipeline.sh
 #   ./run_full_pipeline.sh                          # full sweep
 #   DATASETS="cifar10" HARDWARE="edgegpu_latency" ./run_full_pipeline.sh
-#   SKIP_NOTEBOOKS=1 ./run_full_pipeline.sh         # skip notebook execution
 #   DRY_RUN=1 ./run_full_pipeline.sh                # print commands, don't run
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -29,7 +27,6 @@ HARDWARE="${HARDWARE:-edgegpu_latency raspi4_latency eyeriss_latency}"
 
 # ── Optional flags ────────────────────────────────────────────────────────────
 DRY_RUN="${DRY_RUN:-0}"           # Set to 1 to print commands without running
-SKIP_NOTEBOOKS="${SKIP_NOTEBOOKS:-0}"  # Set to 1 to skip nbconvert step
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -212,57 +209,20 @@ for DATASET in $DATASETS; do
 done
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 6 — Headless notebook execution
+# STEP 6 — Summary
 # ─────────────────────────────────────────────────────────────────────────────
-if [[ "$SKIP_NOTEBOOKS" == "1" ]]; then
-    info "SKIP_NOTEBOOKS=1 — skipping notebook execution."
-else
-    step "Headless notebook execution"
+step "Pipeline complete"
+info "Run timestamp  : $RUN_TS"
+info "Results root   : $PROJECT_ROOT/results/"
+info "Logs root      : $LOGS_ROOT/"
+info "Pipeline log   : $PIPELINE_LOG"
 
-    NB_LOG="$LOGS_ROOT/visualizations_${RUN_TS}.log"
-    mkdir -p "$PROJECT_ROOT/results/figures"
-
-    NOTEBOOKS=(
-        "notebooks/01_pareto_front_viz.ipynb"
-        "notebooks/02_epistasis_heatmap.ipynb"
-        "notebooks/03_algorithm_comparison.ipynb"
-        "notebooks/04_ablation_analysis.ipynb"
-        "notebooks/05_ablation_comparison.ipynb"
-        "notebooks/06_waterfall_buildup.ipynb"
-    )
-
-    for NB in "${NOTEBOOKS[@]}"; do
-        if [[ ! -f "$PROJECT_ROOT/$NB" ]]; then
-            warn "Notebook not found, skipping: $NB"
-            continue
-        fi
-
-        NB_NAME="$(basename "$NB" .ipynb)"
-        info "  Executing $NB_NAME …"
-
-        NB_OUT_DIR="$PROJECT_ROOT/notebooks/executed"
-        mkdir -p "$NB_OUT_DIR"
-
-        if [[ "$DRY_RUN" == "1" ]]; then
-            info "[DRY-RUN] jupyter nbconvert --execute $NB"
-            continue
-        fi
-
-        # Execute in place; failures are logged but do NOT abort the pipeline
-        jupyter nbconvert \
-            --to notebook \
-            --execute \
-            --ExecutePreprocessor.timeout=600 \
-            --output-dir "$NB_OUT_DIR" \
-            "$PROJECT_ROOT/$NB" \
-            >> "$NB_LOG" 2>&1 \
-            && info "  [OK] $NB_NAME" \
-            || warn "  [WARN] $NB_NAME failed — see $NB_LOG"
-    done
+if command -v tree &>/dev/null; then
+    info "Log tree:"
+    tree -L 4 "$LOGS_ROOT" | tee -a "$PIPELINE_LOG"
 fi
 
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 7 — Summary
+info "Done."
 # ─────────────────────────────────────────────────────────────────────────────
 step "Pipeline complete"
 info "Run timestamp  : $RUN_TS"

@@ -4,129 +4,278 @@
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Benchmark](https://img.shields.io/badge/Benchmark-NAS--Bench--201%20%7C%20HW--NAS--Bench-orange)
 
-## 1. Abstract & Motivation
+## 1. Overview
 
-Deploying Deep Learning models on Edge AI devices (smartphones, IoT sensors, UAVs) requires strictly balancing two conflicting objectives: maximizing **Accuracy** while minimizing hardware constraints like **Latency**. Hardware-Aware Neural Architecture Search (HW-NAS) automates this process.
+HW-NAS-Memetic combines a MOEA/D scaffold with discrete PSO and Simulated Annealing to solve hardware-aware NAS in a topology-preserving way. The algorithm is designed for NAS-Bench-201/HW-NAS-Bench, where discrete edge operations are highly epistatic.
 
-Currently, the State-of-the-Art in multi-objective HW-NAS is dominated by purely Evolutionary Algorithms (e.g., NSGA-II). However, in discrete, cell-based search spaces like NAS-Bench-201, neural architectures are represented as Directed Acyclic Graphs (DAGs) exhibiting extreme **epistasis** — the operations within a network are deeply interdependent. Traditional evolutionary crossover violently breaks these dependencies by slicing and combining disparate graphs, frequently causing catastrophic performance collapse.
+Key features:
 
-**HW-NAS-Memetic** proposes a novel solution: a Multi-Level Hybrid Metaheuristic integrating the global scalarization of **MOEA/D** with the topology-preserving local exploitation of a custom **Discrete Probabilistic PSO** and **Simulated Annealing**, enabling safe per-edge hardware optimization without disrupting the functional graph routing.
+- **Config-driven search** via `scripts/run_search.py` and `configs/full_proposed.json`
+- **Calibrated MOEA/D schedule** using `w_init` and `w_final` to span a tuned accuracy-latency trade-off
+- **Manual analysis workflow**: notebooks are analysis artifacts, not pipeline steps
+- **Full sweep orchestration** via `run_full_pipeline.sh` across datasets and hardware metrics
 
-## 2. Why "Memetic"?
+## 2. Core Algorithm Configuration
 
-In optimization literature, there is a strict distinction between Genetic and Memetic algorithms:
+### 2.1 MOEA/D weight schedule
 
-- **Genetic Algorithms (e.g., NSGA-II):** Operate strictly on Darwinian evolution. An architecture is born, evaluated, and either breeds or dies. It undergoes no lifetime learning.
-- **Memetic Algorithms:** Combine population-based global search with lifelong learning. An architecture is generated globally, then given tools to explore its local neighborhood and actively refine its own structure before committing to the Pareto Front.
+MOEA/D decomposes the bi-objective search into `K` scalar sub-problems, each with a weight vector `(w0, w1)`.
+The schedule is produced by linearly sampling accuracy weights between `w_init` and `w_final` and using `w1 = 1 - w0`.
 
-For NAS, purely genetic crossover destroys co-adapted data flow. The Discrete PSO component grants each architecture a "lifetime" to consult its personal memory (`pbest`) and swarm memory (`gbest`), tweaking individual edges (e.g., replacing `nor_conv_3x3` with `skip_connect`) to reduce latency while preserving functional routing — a topology-safe local search that evolutionary algorithms structurally lack.
+```python
+w0 = np.linspace(self.w_init, self.w_final, K)
+w1 = 1.0 - w0
+```
 
-## 3. Key Innovations & Algorithm Architecture
+This creates a set of trade-off directions across accuracy and latency.
 
-### 3.1 MOEA/D Scalarization
+### 2.2 Runtime configuration
 
-$K$ linear weight vectors decompose the bi-objective space into $K$ scalar sub-problems, each solved independently:
+`run_search.py` supports both a JSON configuration file and CLI overrides.
+The default config path is `configs/full_proposed.json`, and common runtime parameters include:
 
-$$g(a \mid w_k) = w_{acc} \cdot Acc(a) - w_{lat} \cdot Lat(a)$$
+- MOEA/D settings: `k_directions`, `w_init`, `w_final`, `scalarization`, `t_neighborhood`
+- SA settings: `t0`, `alpha`, `use_restart`
+- PSO settings: `c1_init`, `c2_init`, `eta`, `target_rate`
+- GA settings: `p_m`, `ga_force_change`, `ga_crossover`, `ga_freq_bias`, `ga_adaptive`
 
-Weight vectors are linearly spaced from $(w_{acc}, w_{lat}) = (1, 0)$ to $(0, 1)$, uniformly covering the accuracy-latency trade-off spectrum. This reduces Pareto-dominance sorting from $O(N^2)$ to $O(K)$ scalar comparisons per iteration.
+### 2.3 Execution workflow
 
-Each sub-problem $k$ maintains a neighborhood $\mathcal{B}(k)$ of $T_n$ nearest sub-problems by weight vector Euclidean distance. gbest influence is bounded to $\mathcal{B}(k)$, preventing premature homogenisation across distant trade-off directions.
+The full experimental pipeline is orchestrated by `run_full_pipeline.sh`.
+It drives a sweep over datasets and hardware metrics, while the notebooks in `notebooks/` remain dedicated analysis artifacts rather than automated pipeline steps.
 
-### 3.2 Dual-Generation Engine
+## 3. Solution Components and Code Location
 
-At each iteration, two candidate architectures are generated per sub-problem:
+### 3.1 MOEA/D core (`src/algorithms/memetic_nas.py`)
 
-- **GA Mutation** (global perturbation): Per-gene Bernoulli mutation at rate $p_m = 1/L$. Each selected edge is replaced by a uniformly random alternative from $\{0..4\} \setminus \{e_{\text{current}}\}$, ensuring a strict change.
-- **Discrete Probabilistic PSO** (local refinement): Each edge $e_i$ is updated according to:
+This module contains the main search engine:
 
-$$P(\text{pull to } p_{\text{best}}) = c_1 \cdot r_1, \quad P(\text{pull to } g_{\text{best}}) = c_2 \cdot r_2$$
+- `MemeticNAS.__init__()` stores `w_init` and `w_final`
+- `_make_weights()` constructs the MOEA/D weight vectors
+- `search()` performs candidate generation, SA acceptance, and restart logic
 
-where $r_1, r_2 \sim \mathcal{U}(0,1)$. This preserves edges already aligned with high-scoring trajectories, directly addressing the epistasis problem.
+### 3.2 Discrete PSO operator (`src/algorithms/operators/pso_operator.py`)
 
-The better of the two candidates (by $g(\cdot \mid w_k)$) proceeds to the acceptance step.
+PSO generates proposals by pulling discrete edge values toward personal best and neighborhood best states.
 
-### 3.3 Simulated Annealing Trajectory Control
+### 3.3 GA operator (`src/algorithms/operators/ga_operator.py`)
 
-The Metropolis criterion governs acceptance of the selected candidate:
+GA mutation uses calibrated DNA from the tuning registry:
 
-$$P(\text{accept}) = \begin{cases} 1 & \text{if } \Delta g \geq 0 \\ \exp\!\left(\Delta g / T\right) & \text{otherwise} \end{cases}$$
+- `p_m = 0.16667`
+- `force_change = true`
+- `crossover = true`
+- `freq_bias = true`
+- `adaptive = false`
 
-where $\Delta g = g_{\text{candidate}} - g_{\text{current}}$. Temperature decays geometrically: $T_{t+1} = \alpha \cdot T_t$, $\alpha \in (0,1)$. High $T$ permits diversity-preserving uphill moves; low $T$ collapses to greedy exploitation.
+### 3.4 SA acceptance (`src/algorithms/operators/sa_operator.py`)
 
-### 3.4 A Posteriori Pareto Filtering
+Acceptance is controlled by Metropolis probability:
 
-The global archive records every evaluated architecture. The final Pareto front is extracted post-search via non-dominated sorting on $(-Acc, Lat)$, decoupling the search trajectory from the output representation.
+```python
+if self.sa_op is not None:
+    accepted, T_sa = self.sa_op.step(scores[k], best_g, self.rng)
+else:
+    accepted = best_g > scores[k]
+```
 
-## 4. Search Space & Problem Encoding
+Temperature decays as:
 
-### NAS-Bench-201 Cell
+```python
+T_{t+1} = \alpha T_t
+```
 
-The search space is a 4-node DAG with $L = 6$ directed edges (all node pairs $(i \to j)$ for $i < j$, $i,j \in \{0,1,2,3\}$). Each edge independently selects one of $O = 5$ operations:
+### 3.5 Configuration loader (`scripts/run_search.py`)
+
+`run_search.py` reads `configs/full_proposed.json` and uses its values for CLI defaults, while allowing runtime override via command-line arguments.
+This centralizes search parameterization and keeps the proposed search reproducible across runs.
+
+## 4. Algorithm Architecture: Proposed Memetic NAS
+
+The diagram below is derived directly from `MemeticNAS.search()`, `GAOperator.apply()`, `PSOOperator.apply()`, and `SAOperator.step()`.
+
+```mermaid
+%%{init: {'themeVariables': {'fontSize': '18px', 'nodeTextSize': 18, 'primaryBorderColor': '#000000', 'edgeLabelBackground':'#ffffff', 'clusterBkg': '#f9f9f9'}}}%%
+flowchart TD
+classDef init fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px,color:#000
+classDef operator fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#000
+classDef sa fill:#fce4ec,stroke:#c2185b,stroke-width:2px,color:#000
+classDef decision fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#000
+classDef archive fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#000
+classDef standard fill:#ffffff,stroke:#757575,stroke-width:1px,color:#000
+style Start fill:#ffffff,stroke:#757575,stroke-width:2px,width:300px,height:90px,padding:20px
+style Archive fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,width:340px,height:90px,padding:20px
+style Budget fill:#ffffff,stroke:#757575,stroke-width:2px,width:320px,height:90px,padding:20px
+style SubLoopStart fill:#ffffff,stroke:#757575,stroke-width:2px,width:340px,height:90px,padding:20px
+style SelectBest fill:#ffffff,stroke:#757575,stroke-width:2px,width:340px,height:90px,padding:20px
+style Metropolis fill:#fff3e0,stroke:#f57c00,stroke-width:2px,width:320px,height:90px,padding:20px
+style CheckPBest fill:#fff3e0,stroke:#f57c00,stroke-width:2px,width:320px,height:90px,padding:20px
+style NextK fill:#fff3e0,stroke:#f57c00,stroke-width:2px,width:320px,height:90px,padding:20px
+style RestartCheck fill:#fff3e0,stroke:#f57c00,stroke-width:2px,width:320px,height:90px,padding:20px
+style W fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px,width:340px,height:90px,padding:20px
+style Nb fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px,width:300px,height:90px,padding:20px
+style Pop fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px,width:340px,height:90px,padding:20px
+style EvalInit fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px,width:340px,height:90px,padding:20px
+style GA fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,width:320px,height:90px,padding:20px
+style PSO fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,width:320px,height:90px,padding:20px
+style Acc fill:#fce4ec,stroke:#c2185b,stroke-width:2px,width:320px,height:90px,padding:20px
+style Rej fill:#fce4ec,stroke:#c2185b,stroke-width:2px,width:320px,height:90px,padding:20px
+style UpPBest fill:#ffffff,stroke:#757575,stroke-width:2px,width:320px,height:90px,padding:20px
+style Propagate fill:#ffffff,stroke:#757575,stroke-width:2px,width:360px,height:90px,padding:20px
+style Reinit fill:#ffffff,stroke:#757575,stroke-width:2px,width:340px,height:90px,padding:20px
+
+Start([Initialize Search])
+Archive[(Global Pareto Archive)]
+Budget{"NFE Budget Remaining?"}
+SubLoopStart["Update gbest_k from T_n"]
+SelectBest["Evaluate GA + PSO<br/>Select best_g"]
+Metropolis{"Accept move?<br/>exp(delta_g / T)"}
+GA["GA Operator<br/>Mutation + Crossover"]
+PSO["PSO Operator<br/>Velocity toward pbest + gbest"]
+Acc["Accept and Update current_k"]
+Rej[Reject and keep previous]
+CheckPBest{"best_g > pbest_k?"}
+UpPBest[Update pbest_k]
+Propagate["Propagate to Neighbors<br/>Update gbest_n if improved"]
+NextK{"k less than K-1?"}
+RestartCheck{"100 iters stagnation?"}
+Reinit["Reinit worst K/2<br/>solutions"]
+W["Build Weight Vectors<br/>linspace w_init to w_final"]
+Nb[Compute T_n Neighborhoods]
+Pop["Initialize Population<br/>K discrete architectures"]
+EvalInit["Evaluate and Scalarize g-scores"]
+
+subgraph Phase1 [1 MOEAD Init]
+    W
+    Nb
+    Pop
+    EvalInit
+    W --> Nb --> Pop --> EvalInit
+end
+
+subgraph Phase2 [2 Sub-problem Loop]
+    SubLoopStart
+    subgraph Operators [3 Memetic Generation]
+        GA
+        PSO
+        GA --> PSO
+    end
+    SelectBest
+end
+
+subgraph SAGate [4 Simulated Annealing Gate]
+    Metropolis
+    Acc
+    Rej
+    Metropolis -- Yes --> Acc
+    Metropolis -- No --> Rej
+end
+
+subgraph Update [5 Neighborhood Update]
+    CheckPBest
+    UpPBest
+    Propagate
+    CheckPBest -- Yes --> UpPBest --> Propagate
+    CheckPBest -- No --> Propagate
+end
+
+subgraph Stagnation [6 Restart Management]
+    RestartCheck
+    Reinit
+    RestartCheck -- Yes --> Reinit
+end
+
+Start --> W
+EvalInit --> Budget
+Budget -- Exhausted --> Archive
+Budget -- Yes --> SubLoopStart
+SubLoopStart --> GA
+PSO --> SelectBest
+SelectBest --> Metropolis
+Acc --> CheckPBest
+Rej --> CheckPBest
+Propagate --> NextK
+NextK -- Yes --> SubLoopStart
+NextK -- No --> RestartCheck
+RestartCheck -- No --> Budget
+Reinit --> Budget
+
+class W,Nb,Pop,EvalInit init
+class GA,PSO operator
+class Budget,Metropolis,CheckPBest,RestartCheck,NextK decision
+class Acc,Rej sa
+class Archive archive
+class Start,SubLoopStart,SelectBest,UpPBest,Propagate,Reinit standard
+```
+
+**Legend**
+
+| Symbol | Meaning |
+|--------|---------|
+| Rectangle | Deterministic process (data transformation, evaluation, update) |
+| Diamond | Decision gate |
+| Cylinder | Persistent data store (the global Pareto archive) |
+| `eval_fn` | Lookup call into HW-NAS-Bench — returns `(accuracy, latency)` |
+| `g-score` | MOEA/D scalarization: `g = w0 × acc − w1 × lat` (linear mode) |
+| `SA Accept` | Metropolis criterion: always accept if `delta_g > 0`; probabilistically accept worse moves |
+| `Propagate` | Improvement is shared with T_n neighbors — the MOEA/D cooperative step |
+| `Restart` | Diversity injection: worst K//2 solutions replaced after 100 stagnant outer iterations |
+
+## 6. Search Space and Encoding
+
+### NAS-Bench-201 cell
+
+The search space is a 4-node DAG with 6 directed edges. Each edge chooses one of 5 operations:
 
 | Index | Operation |
 |-------|-----------|
-| 0 | `none` (zero tensor) |
-| 1 | `skip_connect` (identity) |
+| 0 | `none` |
+| 1 | `skip_connect` |
 | 2 | `avg_pool_3x3` |
 | 3 | `nor_conv_1x1` |
 | 4 | `nor_conv_3x3` |
 
-Total search space: $5^6 = 15{,}625$ architectures.
+Architectures are vectors in $\{0,1,2,3,4\}^6$.
 
-### Encoding
+### Hardware evaluation
 
-An architecture is encoded as an integer vector $a \in \{0,1,2,3,4\}^6$. All operators enforce `shape == (6,)` and `values in [0, 4]`.
+The benchmark provides lookup access via:
 
-### Hardware Evaluation
+- `api.query(arch, device, dataset, metric)`
+- `api.query_accuracy(arch, dataset)`
 
-HW-NAS-Bench provides pre-computed hardware metrics for all 15,625 architectures across 7 devices on 3 datasets:
-
-- **Devices**: `edgegpu`, `raspi4`, `edgetpu`, `pixel3`, `eyeriss`, `fpga`
-- **Metrics**: latency (ms), energy (mJ), arithmetic intensity
-- **Datasets**: `cifar10`, `cifar100`, `ImageNet16-120`
-
-Lookup is $O(1)$ via a pre-built `arch_tuple → index` dictionary in `src/api/hw_nas_wrapper.py`.
-
-## 5. Repository Structure
+## 7. Repository Structure
 
 ```
 HW-NAS-Memetic/
+├── configs/
+│   └── full_proposed.json
 ├── data/
-│   └── HW-NAS-Bench-v1_0.pickle      # Hardware benchmark (download separately)
+│   └── HW-NAS-Bench-v1_0.pickle
 ├── notebooks/
-│   ├── 01_pareto_front_viz.ipynb      # Pareto front scatter + HV/IGD table
-│   └── 02_epistasis_heatmap.ipynb     # Edge perturbation brittleness heatmap
+│   ├── 01_parameter_calibration.ipynb
+│   ├── 01_pareto_front_viz.ipynb
+│   └── ...
 ├── results/
-│   ├── baselines/                     # RandomSearch and NSGA-II JSON archives
-│   └── proposed/                      # ProposedMoeadPso JSON archives
+│   ├── baselines/
+│   └── proposed/
 ├── scripts/
-│   ├── download_data.py               # Automated dataset download
-│   ├── run_baselines.py               # 5-seed baseline sweep
-│   └── run_search.py                  # Proposed algorithm CLI
+│   ├── download_data.py
+│   ├── run_baselines.py
+│   ├── run_search.py
+│   ├── run_ablations.py
+│   ├── run_incremental_build.py
+│   └── run_full_pipeline.sh
 ├── src/
 │   ├── algorithms/
-│   │   ├── base_optimizer.py          # Abstract BaseOptimizer
-│   │   ├── random_search.py           # Random Search baseline
-│   │   ├── proposed_moead_pso.py      # MOEA/D + Discrete PSO + SA (proposed)
-│   │   └── nsga2_search.py            # NSGA-II baseline (pymoo)
-│   ├── analysis/
-│   │   └── pareto_metrics.py          # HV, IGD, proxy Pareto utilities
 │   ├── api/
-│   │   └── hw_nas_wrapper.py          # O(1) HW-NAS-Bench query interface
+│   ├── analysis/
 │   ├── operators/
-│   │   ├── discrete_ga.py             # Mutation and crossover
-│   │   ├── discrete_pso.py            # Probabilistic discrete PSO step
-│   │   └── simulated_annealing.py     # Metropolis acceptance and cooling
 │   └── utils/
-│       └── logger.py                  # save_archive (JSON/CSV) + get_logger
 └── test/
-    └── test_data_loading.py           # Unit tests (9 tests, data + API)
 ```
 
-## 6. Installation & Environment Setup
-
-**Requirements**: Python 3.12, pip.
+## 8. Installation
 
 ```bash
 git clone https://github.com/AbdeslemHMN/HW-NAS-Memetic.git
@@ -134,310 +283,46 @@ cd HW-NAS-Memetic
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-```
-
-**Dataset**: Download `HW-NAS-Bench-v1_0.pickle` and place it in `data/`:
-
-```bash
 python scripts/download_data.py
 ```
 
-**Optional: build the NAS-Bench-201 accuracy cache**
-
-If you want ground-truth NAS-Bench-201 accuracy instead of the structural proxy, run:
+## 9. Running the full pipeline
 
 ```bash
-python scripts/extract_nas201_accuracy.py
+chmod +x run_full_pipeline.sh
+./run_full_pipeline.sh
 ```
 
-This script now queries NATS-Bench TSS in a memory-safe way by evicting each architecture from the internal cache immediately after use, avoiding the out-of-memory / system freeze issue.
+This runs the 3×3 sweep across datasets and hardware targets.
 
-Alternatively, download manually from the [HW-NAS-Bench release](https://github.com/RICE-EIC/HW-NAS-Bench) and place the file at `data/HW-NAS-Bench-v1_0.pickle`.
-
-**Verify installation:**
+Dry run:
 
 ```bash
-python3 -m unittest test.test_data_loading
+DRY_RUN=1 ./run_full_pipeline.sh
 ```
 
-Expected: `Ran 9 tests in ~1s OK`.
-
-## 7. Quickstart & Usage
-
-**Step 1 — Clone and install** (see Section 6).
-
-**Step 2 — Place benchmark data** at `data/HW-NAS-Bench-v1_0.pickle`.
-
-**Step 3 — Run baselines** (30 seeds, RandomSearch + NSGA-II):
+## 10. Running the proposed search directly
 
 ```bash
-python scripts/run_baselines.py
+python scripts/run_search.py --config configs/full_proposed.json
 ```
 
-Outputs saved to `results/baselines/random_search_seed{N}.json` and `results/baselines/nsga2_seed{N}.json`.
-
-**Step 4 — Run proposed search:**
+Override defaults:
 
 ```bash
-python scripts/run_search.py \
-    --hardware edgegpu_latency \
-    --budget 2000 \
-    --k_directions 20
+python scripts/run_search.py --config configs/full_proposed.json \
+    --hardware eyeriss_latency \
+    --k_directions 5 \
+    --w_init 0.6 \
+    --w_final 0.4 \
+    --t0 0.1 \
+    --alpha 0.95 \
+    --c1 0.4 \
+    --c2 0.6
 ```
 
-All CLI flags with defaults:
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--hardware` | `edgegpu_latency` | Hardware metric key |
-| `--budget` | `2000` | Total architecture evaluations |
-| `--k_directions` | `20` | MOEA/D weight vectors $K$ |
-| `--t_neighborhood` | `2` | Neighborhood size $T_n$ |
-| `--t0` | `1.0` | SA initial temperature |
-| `--alpha` | `0.95` | SA cooling rate |
-| `--c1` | `0.5` | PSO personal attraction |
-| `--c2` | `0.5` | PSO global attraction |
-| `--dataset` | `cifar10` | NAS-Bench-201 dataset split |
-| `--seed` | `42` | Random seed |
-
-Output saved to `results/proposed/proposed_res_{seed}.json`.
-
-**Step 5 — Visualize results** via Jupyter:
-
-```bash
-jupyter notebook notebooks/
-```
-
-- `01_pareto_front_viz.ipynb` — Pareto front scatter plot + HV/IGD comparison table.
-- `02_epistasis_heatmap.ipynb` — Per-edge brittleness heatmap over top-10 architectures.
-
-## 8. Baselines & Evaluation Metrics
-
-Two baselines are implemented for rigorous comparison:
-
-| Algorithm | Module | Strategy |
-|-----------|--------|----------|
-| Random Search | `src/algorithms/random_search.py` | i.i.d. uniform sampling over $\{0..4\}^6$ |
-| NSGA-II | `src/algorithms/nsga2_search.py` | pymoo 0.6 with integer SBX + PM + RoundingRepair |
-
-### Metrics
-
-All metrics computed in `src/analysis/pareto_metrics.py` under pymoo's minimisation convention $F = (-Acc, Lat)$:
-
-**Hypervolume (HV):** Volume of objective space dominated by the Pareto front, bounded by reference point $r$:
-
-$$HV(F, r) = \lambda\left(\bigcup_{f \in F} [f, r]\right)$$
-
-Higher is better. Points are normalised to $[0,1]^2$ before cross-algorithm comparison using the proxy Pareto range as scale.
-
-**Inverted Generational Distance (IGD):** Mean distance from the proxy reference front $P^{\ast}$ to the nearest solution in the approximation set $F$:
-
-$$IGD(F, P^{\ast}) = \frac{1}{|P^{\ast}|} \sum_{p \in P^{\ast}} \min_{f \in F} \lVert p - f \rVert_2$$
-
-Lower is better. $P^{\ast}$ is constructed as the non-dominated union of all algorithm runs across all seeds.
-
-## 9. Implemented Upgrades (Advanced Features)
-
-The repository now enforces a strict, budget-fair comparison across all algorithms. The key upgrades are:
-
-- **30 independent seeds for every algorithm**
-  - `scripts/run_baselines.py` runs `RandomSearch` and `NSGA-II` for 30 seeds.
-  - `scripts/run_search.py` now runs the proposed algorithm for 30 seeds and writes outputs to `results/proposed/proposed_res_seed{seed}.json`.
-
-- **Exact NFE budget enforcement**
-  - `src/algorithms/base_optimizer.py` tracks `budget_spent` as the exact Number of Function Evaluations (NFE).
-  - `_eval()` raises immediately if `budget_spent >= budget`, guaranteeing no algorithm can exceed the requested 2000 evaluations.
-
-- **Convergence trajectory snapshots**
-  - Every 100 NFEs, the optimizer records a checkpoint in `nfe_checkpoints`.
-  - This enables convergence plots of Hypervolume versus NFE, rather than only final performance.
-
-- **Fair NSGA-II hyperparameters**
-  - `src/algorithms/nsga2_search.py` now uses standard SBX/PM values:
-    - `crossover prob = 0.9`, `eta=20`
-    - `mutation prob = 1/n_var`, `eta=20`
-  - Termination is now `('n_eval', budget)`, matching the proposed algorithm's strict NFE cap.
-
-- **Statistical hypothesis testing**
-  - The comparison notebooks now include Wilcoxon Rank-Sum tests for HV and IGD.
-  - Bonferroni correction is applied to control familywise error across multiple metric comparisons.
-
-## 10. Recommended Run Sequence
-
-Use this exact order for fair evaluation:
-
-```bash
-python scripts/run_baselines.py
-python scripts/run_search.py --hardware edgegpu_latency --budget 2000 --k_directions 20
-```
-
-Then open the notebooks for analysis:
-
-```bash
-jupyter notebook notebooks/
-```
-
-Recommended notebooks:
-
-- `notebooks/01_pareto_front_viz.ipynb`
-- `notebooks/03_algorithm_comparison.ipynb`
-
-## 11. Expected Output Files
-
-- `results/baselines/random_search_seed{0..4}.json`
-- `results/baselines/nsga2_seed{0..4}.json`
-- `results/proposed/proposed_res_seed{0..4}.json`
-- `results/convergence_trajectory.pdf`
-- `results/ablation_pareto_overlay.pdf`
-- `results/ablations_hv_boxplot.pdf`
-
-
-### 9.1 Self-Adaptive PSO Parameters
-
-Rather than fixed $c_1, c_2$, coefficients adapt per sub-problem $k$ based on recent acceptance rate:
-
-$$c_1^{(t+1)} = c_1^{(t)} + \eta \cdot (\rho_{\text{pbest}} - \rho^{\ast}), \quad c_2^{(t+1)} = c_2^{(t)} + \eta \cdot (\rho_{\text{gbest}} - \rho^{\ast})$$
-
-where $\rho^{\ast}$ is a target success rate and $\eta$ is the adaptation step. Sub-problems stuck in local optima automatically increase $c_2$ (exploitation), while diverse sub-problems increase $c_1$ (exploration).
-
-### 9.2 Multi-Armed Bandit (MAB) Tool Selection
-
-Instead of always generating both GA and PSO candidates (2 evaluations per sub-problem), a $\varepsilon$-greedy bandit selects the single operator with the highest empirical improvement rate. This halves the evaluation budget consumed per cycle when one operator consistently dominates, concentrating budget in the productive search phase.
-
-### 9.3 Dynamic Weight Adaptation
-
-Weight vectors $w_k$ are periodically redistributed toward the region of highest crowding distance on the current Pareto approximation. Sparse regions attract more vectors, preventing over-concentration of solutions in the accuracy-dominant or latency-dominant extremes and improving Hypervolume coverage.
-
-### 9.4 Block-wise PSO
-
-Rather than per-edge probabilistic updates, edges are grouped into structural blocks (e.g., input edges $\{0,1\}$, middle edges $\{2,3\}$, output edges $\{4,5\}$). PSO updates are applied block-wise, preserving intra-block co-adaptation and reducing the probability of disrupting functionally coupled edge groups — directly targeting the epistasis problem at its structural source.
-
-## 10. Methodology & Scientific Rigor
-
-This section documents the **five-phase evaluation protocol** applied to ensure that all results in this repository meet the standards expected at IEEE / NeurIPS / ICLR venues.  
-The goal is to guarantee that every performance claim is **reproducible**, **unbiased**, and **statistically defensible**.
-
----
-
-### Phase 1 — Level Playing Field: Budget Fairness (NFE Cap)
-
-**What**: All algorithms (Proposed, NSGA-II, Random Search) are terminated after exactly **2000 NFE** (Number of Function Evaluations).
-
-**Why**: Comparing algorithms by the number of *generations* is misleading — NSGA-II evaluates a whole population per generation, while our method evaluates one architecture per sub-problem per iteration.  
-The only currency that is truly fair is the total count of architecture evaluations, since each evaluation queries the benchmark and thus represents equal computational cost.
-
-Enforced in: `src/algorithms/base_optimizer.py` (`_eval()` raises `BudgetExhausted` at `budget_spent >= 2000`).
-
----
-
-### Phase 2 — Stochasticity Handling: 30 Independent Seeds
-
-**What**: Every algorithm is executed **30 times** with independent random seeds (`SEEDS = list(range(30))`).
-
-**Why**: Meta-heuristic algorithms are stochastic processes.  A single run result is not a statistic — it is a *sample*.  
-Reporting a single run (as is common in early NAS papers) allows cherry-picking and gives no information about an algorithm's **reliability or variance**.  
-30 seeds provides sufficient statistical power ($1 - \beta \approx 0.8$) for non-parametric tests at $\alpha = 0.05$, matching EC (Evolutionary Computation) community standards.
-
-Scripts: `scripts/run_search.py`, `scripts/run_baselines.py`, `scripts/run_ablations.py`.
-
----
-
-### Phase 3 — Quantitative Metrics: Hypervolume and IGD
-
-**What**: Each algorithm's Pareto front quality is quantified with two complementary indicators:
-
-**Hypervolume (HV)** — *higher is better*
-
-$$HV(F, r) = \lambda\!\left(\bigcup_{f \in F} [f_1,\, r_1] \times [f_2,\, r_2]\right)$$
-
-HV measures the volume of objective space **dominated** by the found front, relative to a reference point $r = (1.1, 1.1)$ in normalised $[0,1]^2$ space.  
-It rewards fronts that are simultaneously **close to the ideal** and **spread across the full trade-off range**.
-
-**Inverted Generational Distance (IGD)** — *lower is better*
-
-$$IGD(F, P^{\ast}) = \frac{1}{|P^{\ast}|} \sum_{p \in P^{\ast}} \min_{f \in F} \lVert p - f \rVert_2$$
-
-IGD measures how well the approximation front **covers** the proxy reference front $P^{\ast}$, which is constructed as the non-dominated union of all algorithm runs across all seeds.  
-A lower IGD means the algorithm's front is denser and closer to the best-known solutions.
-
-**Why both metrics**: HV rewards coverage of the *dominated space*; IGD rewards *proximity to the reference*.  
-An algorithm can score well on one while failing the other (e.g., a single extreme point inflates HV).  
-Reporting both provides a complete, unbiased picture.
-
-Implementation: `src/analysis/pareto_metrics.py`.
-
----
-
-### Phase 4 — Statistical Significance: Non-Parametric Tests + Effect Size
-
-Meta-heuristic performance distributions are **rarely Gaussian** (they are bounded, often multi-modal, and affected by premature convergence events).  
-Therefore, all hypothesis testing uses **non-parametric methods**.
-
-#### Step-by-step testing workflow
-
-1. **Normality check** — `shapiro_wilk(data, alpha=0.05)` (Shapiro & Wilk, 1965).  
-   For $n = 30$ seeds, this is the most powerful available normality test.  
-   If *any* algorithm fails ($p < 0.05$), non-parametric tests are used for *all* comparisons.
-
-2. **Omnibus test** — `kruskal_wallis(groups, alpha=0.05)` (Kruskal & Wallis, 1952).  
-   A non-parametric one-way ANOVA on ranks across all $k$ algorithms.  
-   A significant result ($p < 0.05$) confirms that **at least one group differs**; proceed to pairwise tests.
-
-3. **Pairwise post-hoc test** — `wilcoxon_ranksum(proposed, baseline, alpha=0.05)`.  
-   Mann-Whitney U test (equivalent to Wilcoxon rank-sum) for each proposed-vs-baseline pair.  
-   Returns the **rank-biserial correlation** $r$ as the effect size:
-   $$r = 1 - \frac{2U}{n_1 n_2} \in [-1,\, 1]$$
-   Interpretation: $|r| > 0.5$ large, $0.3$–$0.5$ medium, $0.1$–$0.3$ small.
-
-4. **Multiple comparisons correction** — `bonferroni_correction(p_values)`.  
-   With $k$ pairwise tests, the probability of a false positive inflates to $1 - (1-\alpha)^k$.  
-   Bonferroni adjusts each p-value as $p^{\ast}_i = \min(k \cdot p_i,\; 1)$, controlling the **family-wise error rate** (FWER) at $\alpha$.
-
-Implementation: `src/analysis/stats.py`.  
-Applied in: `notebooks/03_algorithm_comparison.ipynb`.
-
----
-
-### Phase 5 — Internal Validation: Full Component Ablation Study
-
-**What**: Six algorithm configurations are evaluated, each removing one component from the full system:
-
-| ID | Component removed | Hypothesis being tested |
-|----|-------------------|------------------------|
-| T1 | None (full system) | Upper-bound performance |
-| T2 | PSO local refinement | Does PSO contribute beyond GA alone? |
-| T3 | GA global mutation | Does GA contribute beyond PSO alone? |
-| T4 | MOEA/D decomposition ($K=1$) | Does weight-vector decomposition matter? |
-| T5 | Simulated Annealing | Does SA escape local optima? |
-| T6 | Diversity restart | Does restart prevent premature convergence? |
-
-Each configuration runs for **30 seeds × 2000 NFE**.  
-Kruskal-Wallis confirms global differences; pairwise Wilcoxon with Bonferroni correction identifies which components are individually significant.
-
-**Why this is required**: Ablation studies are the gold standard for proving that a proposed algorithm's complexity is **justified** — that no component is redundant and each operator addresses a distinct failure mode.  
-Without ablation, a reviewer cannot distinguish "the whole is greater than the sum of its parts" from "one component does all the work."
-
-Script: `scripts/run_ablations.py`.  
-Analysis: `notebooks/04_ablation_analysis.ipynb`.
-
----
-
-## 11. Citation & Acknowledgements
-
-If you use this repository in your research, please cite:
-
-```bibtex
-@misc{hwnas_memetic_2026,
-  author       = {Abdeslem, HMN},
-  title        = {HW-NAS-Memetic: A Multi-Level Hybrid Metaheuristic for Hardware-Aware Neural Architecture Search},
-  year         = {2026},
-  publisher    = {GitHub},
-  url          = {https://github.com/AbdeslemHMN/HW-NAS-Memetic}
-}
-```
-
-This work builds on the following benchmarks:
-
-- **NAS-Bench-201**: Dong, X. & Yang, Y. (2020). NAS-Bench-201: Extending the Scope of Reproducible Neural Architecture Search. *ICLR 2020*. [[Paper](https://arxiv.org/abs/2001.00326)]
-- **HW-NAS-Bench**: Li, C. et al. (2021). HW-NAS-Bench: Hardware-Aware Neural Architecture Search Benchmark. *ICLR 2021*. [[Paper](https://arxiv.org/abs/2103.10584)]
-- **pymoo**: Blank, J. & Deb, K. (2020). pymoo: Multi-Objective Optimization in Python. *IEEE Access*. [[Paper](https://ieeexplore.ieee.org/document/9078759)]
+## 11. Notes
+
+- `configs/full_proposed.json` now stores calibrated `operator_dna` and `calibration_metadata`.
+- The notebook calibration path remains manual.
+- Notebooks are not executed automatically by `run_full_pipeline.sh`.

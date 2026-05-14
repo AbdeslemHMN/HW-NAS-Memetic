@@ -122,7 +122,7 @@ def _load_configs(config_arg: str | None) -> list[dict]:
             raise FileNotFoundError(f"Config file not found: {p}")
         return [json.loads(p.read_text())]
 
-    paths = sorted(CONFIGS_DIR.glob("*.json"))
+    paths = sorted(CONFIGS_DIR.glob("ablation_*.json"))
     if not paths:
         raise FileNotFoundError(
             f"No JSON config files found in {CONFIGS_DIR}. "
@@ -141,7 +141,7 @@ def _build_eval_fn(api: HWNASApi, metric: str, dataset: str):
     return _eval
 
 
-def _resolve_candidate_operators(cfg: dict) -> list[BaseOperator]:
+def _resolve_candidate_operators(cfg: dict, K: int) -> list[BaseOperator]:
     """Translate config fields into MemeticNAS candidate operators."""
     op_map = {
         "GAOperator": GAOperator,
@@ -150,27 +150,32 @@ def _resolve_candidate_operators(cfg: dict) -> list[BaseOperator]:
         "PSO": PSOOperator,
     }
 
-    if "candidate_ops" in cfg:
-        ops = []
-        for name in cfg["candidate_ops"]:
-            if name not in op_map:
-                raise ValueError(f"Unknown operator name in config: {name}")
-            if name in {"PSOOperator", "PSO"}:
-                ops.append(op_map[name](c1=cfg.get("c1", 0.5), c2=cfg.get("c2", 0.5)))
-            else:
-                ops.append(op_map[name]())
-        if not ops:
-            raise ValueError("Config must specify at least one candidate operator.")
-        return ops
+    op_names = cfg.get("candidate_ops") or (
+        ["GAOperator"] * cfg.get("use_ga", True)
+        + ["PSOOperator"] * cfg.get("use_pso", True)
+    )
+    if not op_names:
+        raise ValueError("Config must specify at least one candidate operator.")
 
-    # Backward compatibility for legacy boolean config file schema.
-    ops = []
-    if cfg.get("use_ga", True):
-        ops.append(GAOperator())
-    if cfg.get("use_pso", True):
-        ops.append(PSOOperator(c1=cfg.get("c1", 0.5), c2=cfg.get("c2", 0.5)))
-    if not ops:
-        raise ValueError("Config must enable at least one of use_ga or use_pso.")
+    ops: list[BaseOperator] = []
+    for name in op_names:
+        if name not in op_map:
+            raise ValueError(f"Unknown operator name in config: {name}")
+        if name in {"PSOOperator", "PSO"}:
+            ops.append(PSOOperator(
+                K=K,
+                c1_init=cfg.get("c1_init", 0.4),
+                c2_init=cfg.get("c2_init", 0.6),
+                eta=cfg.get("pso_eta", 0.10),
+                target_rate=cfg.get("pso_target_rate", 0.20),
+            ))
+        else:
+            ops.append(GAOperator(
+                force_change=cfg.get("ga_force_change", True),
+                crossover=cfg.get("ga_crossover", True),
+                freq_bias=cfg.get("ga_freq_bias", True),
+                adaptive=cfg.get("ga_adaptive", False),
+            ))
     return ops
 
 
@@ -184,8 +189,18 @@ def _build_optimizer(eval_fn: Callable[[np.ndarray], tuple[float, float]], cfg: 
         K = cfg.get("k_directions", 5)
         T_neighborhood = cfg.get("t_neighborhood", 2)
 
-    candidate_ops = _resolve_candidate_operators(cfg)
-    sa_op = SAOperator(T0=cfg.get("t0", 1.0), alpha=cfg.get("alpha", 0.95)) if cfg.get("use_sa", True) else None
+    candidate_ops = _resolve_candidate_operators(cfg, K)
+    sa_op = (
+        SAOperator(
+            T0=cfg.get("t0", 0.1),
+            alpha=cfg.get("alpha", 0.95),
+            T_min=cfg.get("sa_t_min", 0.001),
+            reheat_factor=cfg.get("sa_reheat_factor", 1.25),
+            reheat_trigger=cfg.get("sa_reheat_trigger", 0.15),
+        )
+        if cfg.get("use_sa", True)
+        else None
+    )
 
     return MemeticNAS(
         eval_fn=eval_fn,
@@ -194,6 +209,7 @@ def _build_optimizer(eval_fn: Callable[[np.ndarray], tuple[float, float]], cfg: 
         sa_op=sa_op,
         K=K,
         T_neighborhood=T_neighborhood,
+        scalarization=cfg.get("scalarization", "linear"),
         use_restart=cfg.get("use_restart", True),
         rng=rng,
     )
@@ -302,7 +318,7 @@ def main() -> None:
     log.info("=" * 60)
     log.info("Ablation study complete.  %d/%d runs saved to %s",
              completed, total_runs, RESULTS_DIR)
-    log.info("Open notebooks/04_ablation_analysis.ipynb to visualise results.")
+    log.info("Open notebooks/05_comprehensive_ablation.ipynb to visualise results.")
 
 
 if __name__ == "__main__":
