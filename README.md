@@ -39,10 +39,57 @@ The default config path is `configs/full_proposed.json`, and common runtime para
 - PSO settings: `c1_init`, `c2_init`, `eta`, `target_rate`
 - GA settings: `p_m`, `ga_force_change`, `ga_crossover`, `ga_freq_bias`, `ga_adaptive`
 
-### 2.3 Execution workflow
+### 2.4 Full Pipeline Walkthrough
 
-The full experimental pipeline is orchestrated by `run_full_pipeline.sh`.
-It drives a sweep over datasets and hardware metrics, while the notebooks in `notebooks/` remain dedicated analysis artifacts rather than automated pipeline steps.
+#### Step 1 — Build the Search Space & Weight Vectors
+
+The search begins by constructing `K` MOEA/D weight vectors using `np.linspace` from `w_init` to `w_final`. Each direction `(w0, w1)` defines a distinct accuracy/latency trade-off. Then the algorithm precomputes each sub-problem's fixed `T_n` neighborhood by Euclidean distance between weight vectors.
+
+#### Step 2 — Initialize the Population
+
+A random population of `K` discrete architectures is sampled from the HW-NAS-Bench search space. Each architecture is evaluated via the benchmark lookup API — no training occurs, only table lookup for `(accuracy, latency)`. Each sub-problem then scalarizes its initial score with:
+
+```python
+g(x, w) = w0 * accuracy - w1 * latency
+```
+
+Each sub-problem also initializes its own personal best `pbest_k` to the starting architecture.
+
+#### Step 3 — Main Loop (NFE Budget Check)
+
+The search repeats until the Number of Function Evaluations (`budget`) is exhausted. If the budget is reached, the run ends and the current evaluation archive is returned.
+
+#### Step 4 — Sub-problem Loop (k = 0 to K−1)
+
+For each sub-problem `k`:
+
+- **Build context snapshot**: choose `gbest_k` from `k`'s `T_n` neighborhood using `k`'s own weight vector, then build a read-only `MemeticState` for the operators.
+- **GA Operator**: mutate and crossover the current architecture to produce candidate `x_GA`.
+- **PSO Operator**: compute a discrete velocity toward both `pbest_k` and `gbest_k` to produce candidate `x_PSO`.
+- **Select Best**: evaluate both candidates and keep the one with higher scalarized `g` score under weight `k`.
+
+#### Step 5 — Simulated Annealing Gatekeeper
+
+The selected candidate is accepted if it improves `g`.
+If it is worse, the candidate may still be accepted with probability `exp(delta_g / T)` when SA is enabled. This helps the search escape local optima early in the run.
+
+#### Step 6 — Neighborhood & Memory Update
+
+If the accepted candidate improves `pbest_k`, update `pbest_k`.
+Then propagate the new solution to all `T_n` neighbors: for each neighbor `n`, if the new candidate scores better under `n`'s own weight vector, it is used to update `gbest[n]`.
+This is the MOEA/D cooperative step where one good discovery helps the entire neighborhood.
+
+#### Step 7 — Restart Management (Stagnation Check)
+
+If the outer loop goes `100` iterations without a meaningful improvement, the worst `K//2` sub-problems are reinitialized randomly and the SA temperature is reheated. This injects diversity while preserving the rest of the population.
+
+#### Step 8 — Evaluation Archive
+
+All evaluated architectures are logged into `BaseOptimizer.global_archive`. The search returns this evaluation history, which can then be post-processed into a Pareto front during analysis.
+
+#### Full Flow in One Line
+
+Random init → scalarize per sub-problem → for each `k`: GA + PSO → SA gate → propagate to neighbors → stagnation restart → repeat until NFE exhausted → return evaluation archive.
 
 ## 3. Solution Components and Code Location
 
