@@ -110,7 +110,9 @@ def wilcoxon_ranksum(
     b = np.asarray(hv_baseline, dtype=float)
     n1, n2 = len(a), len(b)
     U_stat, p_value = mannwhitneyu(a, b, alternative="two-sided")
-    effect_r = 1.0 - (2.0 * U_stat) / (n1 * n2)
+    # Rank-biserial correlation: r = 2*U_x/(n1*n2) - 1
+    # Positive r means a (proposed) tends to be stochastically larger (better for HV).
+    effect_r = (2.0 * U_stat) / (n1 * n2) - 1.0
     return {
         "U_stat": float(U_stat),
         "p_value": float(p_value),
