@@ -1,0 +1,12 @@
+,,Proposed,Proposed,NSGA-II,NSGA-II,Random Search,Random Search
+,,Score,Rank,Score,Rank,Score,Rank
+Dataset,Hardware,,,,,,
+cifar10,edgegpu,9.0,2.0,6.0,1.0,9.0,2.0
+cifar10,raspi4,10.0,3.0,5.0,1.0,9.0,2.0
+cifar10,eyeriss,10.0,3.0,6.0,1.0,8.0,2.0
+cifar100,edgegpu,6.0,1.0,9.0,2.0,9.0,2.0
+cifar100,raspi4,10.0,3.0,5.0,1.0,9.0,2.0
+cifar100,eyeriss,9.0,2.0,6.0,1.0,9.0,2.0
+ImageNet16-120,edgegpu,9.0,2.0,6.0,1.0,9.0,2.0
+ImageNet16-120,raspi4,9.0,2.0,6.0,1.0,9.0,2.0
+ImageNet16-120,eyeriss,8.0,2.0,6.0,1.0,10.0,3.0

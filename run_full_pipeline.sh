@@ -8,6 +8,7 @@
 #   3. Baselines         (run_baselines.py)
 #   4. Ablation study    (run_ablations.py)
 #   5. Incremental build (run_incremental_build.py)
+#   6. Waterfall sweep   (run_waterfall.py)  — 30 seeds × stages 1–3
 #
 # All per-run stdout+stderr are captured to:
 #   logs/<dataset>/<hardware>/<script>_<TIMESTAMP>.log
@@ -196,11 +197,23 @@ for DATASET in $DATASETS; do
             scripts/run_ablations.py \
             --dataset   "$DATASET" \
             --hardware  "$HW"
-
+        # ── Component-isolation baselines (30 seeds × 4 variants) ────────────────
+        info "  → run_component_baselines.py"
+        run_py "$LOG_DIR/component_baselines_${RUN_TS}.log" \
+            scripts/run_component_baselines.py \
+            --dataset   "$DATASET" \
+            --hardware  "$HW"
         # ── Incremental build ─────────────────────────────────────────────
         info "  → run_incremental_build.py"
         run_py "$LOG_DIR/incremental_${RUN_TS}.log" \
             scripts/run_incremental_build.py \
+            --dataset   "$DATASET" \
+            --hardware  "$HW"
+
+        # ── Waterfall sweep (30 seeds × stages 1–3) ───────────────────────
+        info "  → run_waterfall.py"
+        run_py "$LOG_DIR/waterfall_${RUN_TS}.log" \
+            scripts/run_waterfall.py \
             --dataset   "$DATASET" \
             --hardware  "$HW"
 

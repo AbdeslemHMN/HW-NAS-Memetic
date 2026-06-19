@@ -14,6 +14,7 @@ Key features:
 - **Calibrated MOEA/D schedule** using `w_init` and `w_final` to span a tuned accuracy-latency trade-off
 - **Manual analysis workflow**: notebooks are analysis artifacts, not pipeline steps
 - **Full sweep orchestration** via `run_full_pipeline.sh` across datasets and hardware metrics
+- **Component-isolation baselines** via `scripts/run_component_baselines.py`, which executes `moead_only`, `ga_only`, `pso_only`, and `sa_only` with 30 seeds per combo
 
 ## 2. Core Algorithm Configuration
 
@@ -311,6 +312,7 @@ HW-NAS-Memetic/
 │   ├── run_search.py
 │   ├── run_ablations.py
 │   ├── run_incremental_build.py
+│   ├── run_waterfall.py
 │   └── run_full_pipeline.sh
 ├── src/
 │   ├── algorithms/
@@ -367,7 +369,33 @@ python scripts/run_search.py --config configs/full_proposed.json \
     --c2 0.6
 ```
 
-## 11. Notes
+## 11. Running the waterfall sweep (30 seeds)
+
+`run_waterfall.py` executes stages 1–3 of the pipeline for **30 independent seeds** across a given dataset × hardware combination.  Stage 4 (Full Proposed) reuses the results already produced by `run_search.py`.
+
+```bash
+# Single combo
+python scripts/run_waterfall.py --dataset cifar10 --hardware edgegpu_latency
+
+# Full 3 × 3 sweep (all datasets and hardware)
+for DS in cifar10 cifar100 ImageNet16-120; do
+  for HW in edgegpu_latency raspi4_latency eyeriss_latency; do
+    python scripts/run_waterfall.py --dataset $DS --hardware $HW
+  done
+done
+```
+
+Outputs land in `results/waterfall/<dataset>/<hardware>/` as per-seed JSON files:
+```
+results/waterfall/<dataset>/<hardware>/
+    stage1_random_seed0.json  …  stage1_random_seed29.json
+    stage2_moead_ga_seed0.json  …  stage2_moead_ga_seed29.json
+    stage3_moead_ga_pso_seed0.json  …  stage3_moead_ga_pso_seed29.json
+```
+
+Re-running is safe: existing files are skipped by default (`--skip-existing`).  Use `--force` to overwrite.
+
+## 12. Notes
 
 - `configs/full_proposed.json` now stores calibrated `operator_dna` and `calibration_metadata`.
 - The notebook calibration path remains manual.
